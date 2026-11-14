@@ -1,16 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Code, Code2, Download, Eye, FileCode, Layers, RefreshCw, Save, Sliders } from 'lucide-react';
-import { ChatPane, ProjectSnapshot } from './components/ChatPane';
+import { ChatPane, DatabaseRequestSpec, ProjectSnapshot } from './components/ChatPane';
 import { TerminalPane } from './components/TerminalPane';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { StarterGalleryModal } from './components/StarterGalleryModal';
 import { ExportCodeModal } from './components/ExportCodeModal';
 import { CodeEditor } from './components/CodeEditor';
-import {
-  DatabaseModal,
-  loadStoredDbConfig,
-  ProjectDatabaseConfig,
-} from './components/DatabaseModal';
 import {
   DEFAULT_RUN_SETTINGS,
   RunSettings,
@@ -32,7 +27,7 @@ import {
 import { executeStudioActions, parseStudioActions } from './engine/parser';
 import { downloadProjectAsZip } from './engine/export';
 import { STARTER_GALLERY, STARTER_TEMPLATE, StarterAppTemplate } from './prompts/templates';
-import { buildSystemPrompt } from './prompts/system';
+import { buildSystemPrompt, ConnectedDatabaseInfo } from './prompts/system';
 
 const RUN_SETTINGS_STORAGE_KEY = 'open_ai_studio_run_settings';
 
@@ -50,12 +45,13 @@ export default function App() {
   const [modelId, setModelId] = useState(FREE_PROVIDERS[0].models[0].id);
   const [customModelId, setCustomModelId] = useState('');
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
-  const [isDatabaseModalOpen, setIsDatabaseModalOpen] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [activeTemplateId, setActiveTemplateId] = useState(STARTER_GALLERY[0].id);
 
-  const [dbConfig, setDbConfig] = useState<ProjectDatabaseConfig>(loadStoredDbConfig);
+  const [connectedDatabases, setConnectedDatabases] = useState<ConnectedDatabaseInfo[]>([]);
+  const [submittedDbRequestIds, setSubmittedDbRequestIds] = useState<Record<string, boolean>>({});
+
   const [runSettings, setRunSettings] = useState<RunSettings>(loadStoredRunSettings);
   const [isRunSettingsOpen, setIsRunSettingsOpen] = useState(true);
 
@@ -135,6 +131,8 @@ export default function App() {
       setMessages([]);
       setSnapshotsByMessageIndex({});
       setActiveSnapshotId(null);
+      setConnectedDatabases([]);
+      setSubmittedDbRequestIds({});
       versionCounterRef.current = 0;
 
       terminalWriteRef.current?.(`\r\n--- Loading starter: ${template.name} ---\r\n`);
@@ -185,10 +183,10 @@ export default function App() {
   const handleSendMessage = async (
     userPrompt: string,
     images?: string[],
-    overrideDbConfig?: ProjectDatabaseConfig
+    overrideConnectedDbs?: ConnectedDatabaseInfo[]
   ) => {
     setLastError(null);
-    const activeDb = overrideDbConfig ?? dbConfig;
+    const activeDbs = overrideConnectedDbs ?? connectedDatabases;
 
     const userContent: string | ChatContentPart[] =
       images && images.length > 0
@@ -224,7 +222,7 @@ export default function App() {
           activeContext,
           runSettings.customInstructions,
           appEntryContent,
-          activeDb
+          activeDbs
         ),
       };
 
@@ -293,48 +291,62 @@ export default function App() {
     }
   };
 
-  const handleSaveAndWireDatabase = async (
-    nextConfig: ProjectDatabaseConfig,
-    autoWirePrompt?: string
+  const handleConnectDatabaseFromChat = async (
+    spec: DatabaseRequestSpec,
+    values: Record<string, string>
   ) => {
-    setDbConfig(nextConfig);
+    const provider = spec.provider.toLowerCase();
+    const cleanedEntries = Object.entries(values)
+      .filter(([, v]) => v.trim().length > 0)
+      .map(([k, v]) => [k.trim(), v.trim()] as const);
 
-    if (nextConfig.provider === 'supabase') {
-      terminalWriteRef.current?.('\r\n--- Configuring Supabase client in WebContainer ---\r\n');
-      await writeFile(
-        '.env',
-        `VITE_SUPABASE_URL=${nextConfig.supabaseUrl.trim()}\nVITE_SUPABASE_ANON_KEY=${nextConfig.supabaseAnonKey.trim()}\n`
-      );
+    const envVars: Record<string, string> = Object.fromEntries(cleanedEntries);
+
+    // Append or write .env in WebContainer
+    const existingEnv = await readFile('.env').catch(() => '');
+    const newEnvLines = cleanedEntries.map(([k, v]) => `${k}=${v}`).join('\n');
+    await writeFile('.env', `${existingEnv.trim()}\n${newEnvLines}\n`.trim() + '\n');
+
+    if (provider.includes('supabase')) {
+      terminalWriteRef.current?.('\r\n--- Setting up Supabase client in WebContainer ---\r\n');
       await writeFile(
         'src/lib/supabase.ts',
         `import { createClient } from '@supabase/supabase-js';\n\nconst supabaseUrl = import.meta.env.VITE_SUPABASE_URL;\nconst supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;\n\nexport const supabase = createClient(supabaseUrl, supabaseAnonKey);\n`
       );
       terminalWriteRef.current?.('\r\n$ npm install @supabase/supabase-js\r\n');
       await runShellCommand('npm install @supabase/supabase-js', (d) => terminalWriteRef.current?.(d));
-      await refreshFiles();
-    } else if (nextConfig.provider === 'firebase') {
-      terminalWriteRef.current?.('\r\n--- Configuring Firebase client in WebContainer ---\r\n');
-      await writeFile(
-        '.env',
-        [
-          `VITE_FIREBASE_API_KEY=${nextConfig.firebaseApiKey.trim()}`,
-          `VITE_FIREBASE_AUTH_DOMAIN=${nextConfig.firebaseAuthDomain.trim()}`,
-          `VITE_FIREBASE_PROJECT_ID=${nextConfig.firebaseProjectId.trim()}`,
-          `VITE_FIREBASE_APP_ID=${nextConfig.firebaseAppId.trim()}`,
-        ].join('\n') + '\n'
-      );
+    } else if (provider.includes('firebase')) {
+      terminalWriteRef.current?.('\r\n--- Setting up Firebase client in WebContainer ---\r\n');
       await writeFile(
         'src/lib/firebase.ts',
         `import { initializeApp } from 'firebase/app';\nimport { getFirestore } from 'firebase/firestore';\nimport { getAuth } from 'firebase/auth';\n\nconst firebaseConfig = {\n  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,\n  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,\n  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,\n  appId: import.meta.env.VITE_FIREBASE_APP_ID,\n};\n\nexport const app = initializeApp(firebaseConfig);\nexport const db = getFirestore(app);\nexport const auth = getAuth(app);\n`
       );
       terminalWriteRef.current?.('\r\n$ npm install firebase\r\n');
       await runShellCommand('npm install firebase', (d) => terminalWriteRef.current?.(d));
-      await refreshFiles();
     }
 
-    if (autoWirePrompt) {
-      await handleSendMessage(autoWirePrompt, undefined, nextConfig);
-    }
+    await refreshFiles();
+    const updatedDbs: ConnectedDatabaseInfo[] = [
+      ...connectedDatabases.filter((d) => d.provider !== spec.provider),
+      { provider: spec.provider, envVars },
+    ];
+    setConnectedDatabases(updatedDbs);
+    setSubmittedDbRequestIds((prev) => ({ ...prev, [spec.id]: true }));
+
+    await handleSendMessage(
+      `I have connected ${spec.title}. Wire the app to use ${spec.provider} with the environment keys (${Object.keys(
+        envVars
+      ).join(', ')}) and include any required table/collection schema in your summary.`,
+      undefined,
+      updatedDbs
+    );
+  };
+
+  const handleSkipDatabaseFromChat = (spec: DatabaseRequestSpec) => {
+    setSubmittedDbRequestIds((prev) => ({ ...prev, [spec.id]: true }));
+    handleSendMessage(
+      `Skip ${spec.title} for now and keep full persistence working using browser localStorage.`
+    );
   };
 
   const handleStopGeneration = () => {
@@ -347,12 +359,6 @@ export default function App() {
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-zinc-950 text-zinc-100">
       <ApiKeyModal isOpen={isKeyModalOpen} onClose={() => setIsKeyModalOpen(false)} />
-      <DatabaseModal
-        isOpen={isDatabaseModalOpen}
-        onClose={() => setIsDatabaseModalOpen(false)}
-        config={dbConfig}
-        onSaveAndWire={handleSaveAndWireDatabase}
-      />
       <StarterGalleryModal
         isOpen={isGalleryOpen}
         onClose={() => setIsGalleryOpen(false)}
@@ -378,11 +384,12 @@ export default function App() {
           setModelId={setModelId}
           customModelId={customModelId}
           setCustomModelId={setCustomModelId}
-          dbConfig={dbConfig}
-          onOpenDatabase={() => setIsDatabaseModalOpen(true)}
           messages={messages}
           snapshotsByMessageIndex={snapshotsByMessageIndex}
           activeSnapshotId={activeSnapshotId}
+          submittedDbRequestIds={submittedDbRequestIds}
+          onConnectDatabaseFromChat={handleConnectDatabaseFromChat}
+          onSkipDatabaseFromChat={handleSkipDatabaseFromChat}
           onRestoreSnapshot={handleRestoreSnapshot}
           isGenerating={isGenerating}
           lastError={lastError}

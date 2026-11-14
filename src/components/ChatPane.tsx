@@ -16,10 +16,10 @@ import {
   Database,
   Sparkles,
   ArrowUpRight,
+  ClipboardList,
 } from 'lucide-react';
 import { FREE_PROVIDERS } from '../providers/models';
 import { ChatMessage } from '../providers/client';
-import { ProjectDatabaseConfig } from './DatabaseModal';
 
 export interface ProjectSnapshot {
   id: string;
@@ -27,6 +27,21 @@ export interface ProjectSnapshot {
   label: string;
   timestamp: string;
   files: Record<string, string>;
+}
+
+export interface DatabaseFieldSpec {
+  key: string;
+  label: string;
+  placeholder: string;
+  secret?: boolean;
+}
+
+export interface DatabaseRequestSpec {
+  id: string;
+  provider: string;
+  title: string;
+  reason: string;
+  fields: DatabaseFieldSpec[];
 }
 
 interface ParsedTaskItem {
@@ -42,18 +57,91 @@ interface SuggestionCardItem {
 }
 
 interface ParsedAssistantDisplay {
+  planLines: string[];
   tasks: ParsedTaskItem[];
+  dbRequest: DatabaseRequestSpec | null;
   summaryLines: string[];
   suggestions: SuggestionCardItem[];
 }
 
-function parseAssistantDisplay(rawText: string, isStreaming: boolean): ParsedAssistantDisplay {
+function parseDatabaseRequest(rawText: string, msgIndex: number): {
+  dbRequest: DatabaseRequestSpec | null;
+  cleanedText: string;
+} {
+  const dbRegex = /<studioDatabaseRequest\s+([^>]+)>([\s\S]*?)<\/studioDatabaseRequest>/;
+  const match = rawText.match(dbRegex);
+  if (!match) {
+    // Also strip incomplete streaming tag if still typing
+    const partialCleaned = rawText.replace(/<studioDatabaseRequest[\s\S]*$/, '');
+    return { dbRequest: null, cleanedText: partialCleaned };
+  }
+
+  const attrs = match[1];
+  const inner = match[2];
+
+  const providerMatch = attrs.match(/provider=["']([^"']+)["']/);
+  const titleMatch = attrs.match(/title=["']([^"']+)["']/);
+  const reasonMatch = attrs.match(/reason=["']([^"']+)["']/);
+
+  const fields: DatabaseFieldSpec[] = [];
+  const fieldRegex = /<field\s+([^>]+?)\s*\/?>/g;
+  let fieldMatch: RegExpExecArray | null;
+  while ((fieldMatch = fieldRegex.exec(inner)) !== null) {
+    const fAttrs = fieldMatch[1];
+    const keyM = fAttrs.match(/key=["']([^"']+)["']/);
+    const labelM = fAttrs.match(/label=["']([^"']+)["']/);
+    const placeholderM = fAttrs.match(/placeholder=["']([^"']+)["']/);
+    const secretM = fAttrs.match(/secret=["']([^"']+)["']/);
+
+    if (keyM) {
+      fields.push({
+        key: keyM[1],
+        label: labelM?.[1] || keyM[1],
+        placeholder: placeholderM?.[1] || '',
+        secret: secretM?.[1] === 'true',
+      });
+    }
+  }
+
+  const dbRequest: DatabaseRequestSpec = {
+    id: `db_req_${msgIndex}_${providerMatch?.[1] || 'custom'}`,
+    provider: providerMatch?.[1] || 'custom',
+    title: titleMatch?.[1] || 'Connect Project Database',
+    reason: reasonMatch?.[1] || 'Provide your database credentials to enable persistent cloud storage.',
+    fields:
+      fields.length > 0
+        ? fields
+        : [
+            {
+              key: 'VITE_DATABASE_URL',
+              label: 'Database Connection URL',
+              placeholder: 'https://...',
+            },
+            {
+              key: 'VITE_DATABASE_API_KEY',
+              label: 'API / Anon Key',
+              placeholder: 'Your API key...',
+              secret: true,
+            },
+          ],
+  };
+
+  const cleanedText = rawText.replace(dbRegex, '').trim();
+  return { dbRequest, cleanedText };
+}
+
+function parseAssistantDisplay(
+  rawText: string,
+  isStreaming: boolean,
+  msgIndex: number
+): ParsedAssistantDisplay {
+  const { dbRequest, cleanedText } = parseDatabaseRequest(rawText, msgIndex);
   const tasks: ParsedTaskItem[] = [];
 
   // 1. Extract completed <studioAction ...>...</studioAction> blocks
   const closedRegex = /<studioAction\s+([^>]+)>([\s\S]*?)<\/studioAction>/g;
   let match: RegExpExecArray | null;
-  while ((match = closedRegex.exec(rawText)) !== null) {
+  while ((match = closedRegex.exec(cleanedText)) !== null) {
     const attrs = match[1];
     const body = match[2].trim();
     const typeMatch = attrs.match(/type=["']([^"']+)["']/);
@@ -70,10 +158,19 @@ function parseAssistantDisplay(rawText: string, isStreaming: boolean): ParsedAss
     }
   }
 
-  let remainder = rawText.replace(/<studioAction\s+[^>]+>[\s\S]*?<\/studioAction>/g, '');
+  // Split text BEFORE the first <studioAction> (the Implementation Plan) vs AFTER (Summary & Next Tweaks)
+  const firstActionIdx = cleanedText.indexOf('<studioAction');
+  const beforeActionsText =
+    firstActionIdx === -1 ? cleanedText : cleanedText.slice(0, firstActionIdx);
+  let afterActionsText =
+    firstActionIdx === -1
+      ? ''
+      : cleanedText
+          .slice(firstActionIdx)
+          .replace(/<studioAction\s+[^>]+>[\s\S]*?<\/studioAction>/g, '');
 
-  // 2. Check for an active (unclosed) <studioAction ...> block
-  const openTagMatch = remainder.match(/<studioAction\s+([^>]*)>([\s\S]*)$/);
+  // Check for an active (unclosed) <studioAction ...> block
+  const openTagMatch = afterActionsText.match(/<studioAction\s+([^>]*)>([\s\S]*)$/);
   if (openTagMatch) {
     const attrs = openTagMatch[1];
     const partialBody = openTagMatch[2].trim();
@@ -102,13 +199,23 @@ function parseAssistantDisplay(rawText: string, isStreaming: boolean): ParsedAss
       });
     }
 
-    remainder = remainder.slice(0, openTagMatch.index);
+    afterActionsText = afterActionsText.slice(0, openTagMatch.index);
   }
 
-  remainder = remainder.replace(/<studioAction[^>]*$/g, '').trim();
+  afterActionsText = afterActionsText.replace(/<studioAction[^>]*$/g, '').trim();
 
-  // 3. Split clean summary lines vs clickable "Suggested Next Tweaks"
-  const lines = remainder.split('\n');
+  // Parse Plan Lines (if tasks exist, beforeActionsText is the upfront plan)
+  const planLines =
+    tasks.length > 0
+      ? beforeActionsText
+          .split('\n')
+          .map((l) => l.trim())
+          .filter(Boolean)
+      : [];
+
+  // Parse Summary & Suggested Next Tweaks
+  const postText = tasks.length > 0 ? afterActionsText : beforeActionsText;
+  const lines = postText.split('\n');
   const summaryLines: string[] = [];
   const suggestions: SuggestionCardItem[] = [];
   let inSuggestionsSection = false;
@@ -162,7 +269,7 @@ function parseAssistantDisplay(rawText: string, isStreaming: boolean): ParsedAss
     }
   }
 
-  return { tasks, summaryLines, suggestions };
+  return { planLines, tasks, dbRequest, summaryLines, suggestions };
 }
 
 function renderInlineBold(text: string): React.ReactNode {
@@ -179,6 +286,134 @@ function renderInlineBold(text: string): React.ReactNode {
   });
 }
 
+function renderStructuredLines(lines: string[]): React.ReactNode {
+  return lines.map((line, idx) => {
+    if (!line) return <div key={idx} className="h-1" />;
+
+    if (/^#{1,3}\s+/.test(line) || /^\*\*[^*]+\*\*:?$/.test(line)) {
+      const headingText = line.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').replace(/:$/, '');
+      return (
+        <div
+          key={idx}
+          className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 pt-1"
+        >
+          {headingText}
+        </div>
+      );
+    }
+
+    if (/^[-*•]\s+/.test(line)) {
+      const bulletBody = line.replace(/^[-*•]\s+/, '');
+      return (
+        <div key={idx} className="flex items-start gap-2 pl-1">
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
+          <div className="flex-1">{renderInlineBold(bulletBody)}</div>
+        </div>
+      );
+    }
+
+    return <div key={idx}>{renderInlineBold(line)}</div>;
+  });
+}
+
+interface InlineDatabaseCardProps {
+  spec: DatabaseRequestSpec;
+  isSubmitted: boolean;
+  isGenerating: boolean;
+  onSubmitCredentials: (spec: DatabaseRequestSpec, values: Record<string, string>) => Promise<void>;
+  onSkipDatabase: (spec: DatabaseRequestSpec) => void;
+}
+
+const InlineDatabaseCard: React.FC<InlineDatabaseCardProps> = ({
+  spec,
+  isSubmitted,
+  isGenerating,
+  onSubmitCredentials,
+  onSkipDatabase,
+}) => {
+  const [values, setValues] = useState<Record<string, string>>(() => {
+    const initial: Record<string, string> = {};
+    for (const f of spec.fields) {
+      initial[f.key] = '';
+    }
+    return initial;
+  });
+  const [isConnecting, setIsConnecting] = useState(false);
+
+  const hasRequiredValue = spec.fields.some((f) => (values[f.key] || '').trim().length > 0);
+
+  const handleConnect = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!hasRequiredValue || isConnecting || isGenerating) return;
+    setIsConnecting(true);
+    try {
+      await onSubmitCredentials(spec, values);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  if (isSubmitted) {
+    return (
+      <div className="p-2.5 rounded-lg bg-emerald-950/40 border border-emerald-500/40 flex items-center gap-2 text-xs text-emerald-300">
+        <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+        <div>
+          <span className="font-semibold">{spec.title}</span> connected and wired into project.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={handleConnect}
+      className="p-3 rounded-lg bg-zinc-900 border border-emerald-500/40 space-y-2.5 shadow-md"
+    >
+      <div className="flex items-start gap-2">
+        <Database className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+        <div className="space-y-0.5">
+          <div className="text-xs font-bold text-zinc-100">{spec.title}</div>
+          <div className="text-[11px] text-zinc-400 leading-snug">{spec.reason}</div>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        {spec.fields.map((field) => (
+          <div key={field.key} className="space-y-1">
+            <label className="block text-[11px] font-medium text-zinc-300">{field.label}</label>
+            <input
+              type={field.secret ? 'password' : 'text'}
+              value={values[field.key] || ''}
+              onChange={(e) => setValues((prev) => ({ ...prev, [field.key]: e.target.value }))}
+              placeholder={field.placeholder}
+              className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-xs text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center justify-end gap-2 pt-1">
+        <button
+          type="button"
+          disabled={isConnecting || isGenerating}
+          onClick={() => onSkipDatabase(spec)}
+          className="px-2.5 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-[11px] text-zinc-300"
+        >
+          Use LocalStorage Instead
+        </button>
+        <button
+          type="submit"
+          disabled={!hasRequiredValue || isConnecting || isGenerating}
+          className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-[11px] font-semibold text-white flex items-center gap-1.5"
+        >
+          {isConnecting && <Loader2 className="w-3 h-3 animate-spin" />}
+          {isConnecting ? 'Connecting...' : 'Connect & Wire Database'}
+        </button>
+      </div>
+    </form>
+  );
+};
+
 interface ChatPaneProps {
   providerId: string;
   setProviderId: (id: string) => void;
@@ -186,11 +421,15 @@ interface ChatPaneProps {
   setModelId: (id: string) => void;
   customModelId: string;
   setCustomModelId: (id: string) => void;
-  dbConfig: ProjectDatabaseConfig;
-  onOpenDatabase: () => void;
   messages: ChatMessage[];
   snapshotsByMessageIndex: Record<number, ProjectSnapshot>;
   activeSnapshotId: string | null;
+  submittedDbRequestIds: Record<string, boolean>;
+  onConnectDatabaseFromChat: (
+    spec: DatabaseRequestSpec,
+    values: Record<string, string>
+  ) => Promise<void>;
+  onSkipDatabaseFromChat: (spec: DatabaseRequestSpec) => void;
   onRestoreSnapshot: (snapshot: ProjectSnapshot) => void;
   isGenerating: boolean;
   lastError: string | null;
@@ -241,11 +480,12 @@ export function ChatPane({
   setModelId,
   customModelId,
   setCustomModelId,
-  dbConfig,
-  onOpenDatabase,
   messages,
   snapshotsByMessageIndex,
   activeSnapshotId,
+  submittedDbRequestIds,
+  onConnectDatabaseFromChat,
+  onSkipDatabaseFromChat,
   onRestoreSnapshot,
   isGenerating,
   lastError,
@@ -347,22 +587,43 @@ export function ChatPane({
     );
   };
 
-  const renderAssistantContent = (content: ChatMessage['content'], isStreamingMessage: boolean) => {
+  const renderAssistantContent = (
+    content: ChatMessage['content'],
+    isStreamingMessage: boolean,
+    msgIndex: number
+  ) => {
     const rawText = typeof content === 'string' ? content : '';
-    const { tasks, summaryLines, suggestions } = parseAssistantDisplay(rawText, isStreamingMessage);
+    const { planLines, tasks, dbRequest, summaryLines, suggestions } = parseAssistantDisplay(
+      rawText,
+      isStreamingMessage,
+      msgIndex
+    );
 
     if (!rawText && isStreamingMessage) {
       return (
         <span className="inline-flex items-center gap-2 text-indigo-300 font-medium">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          Planning your app...
+          Drafting implementation plan...
         </span>
       );
     }
 
     return (
       <div className="space-y-3">
-        {/* Clean Task Progress Pills */}
+        {/* 1. Upfront Implementation Plan */}
+        {planLines.length > 0 && (
+          <div className="p-2.5 rounded-lg bg-zinc-900/70 border border-zinc-800/90 space-y-1.5">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-indigo-300">
+              <ClipboardList className="w-3.5 h-3.5" />
+              <span>Execution Plan</span>
+            </div>
+            <div className="space-y-1 text-zinc-300 leading-relaxed">
+              {renderStructuredLines(planLines)}
+            </div>
+          </div>
+        )}
+
+        {/* 2. Clean Task Progress Pills */}
         {tasks.length > 0 && (
           <div className="space-y-1.5">
             {tasks.map((task, idx) => (
@@ -390,39 +651,21 @@ export function ChatPane({
           </div>
         )}
 
-        {/* Organized Summary with Bold Headings & Bullets */}
+        {/* 3. In-Chat Database Credential Card (when AI detects a database is needed) */}
+        {dbRequest && !isStreamingMessage && (
+          <InlineDatabaseCard
+            spec={dbRequest}
+            isSubmitted={Boolean(submittedDbRequestIds[dbRequest.id])}
+            isGenerating={isGenerating}
+            onSubmitCredentials={onConnectDatabaseFromChat}
+            onSkipDatabase={onSkipDatabaseFromChat}
+          />
+        )}
+
+        {/* 4. Organized Summary with Bold Headings & Bullets */}
         {summaryLines.length > 0 && (
           <div className="space-y-1.5 text-zinc-300 leading-relaxed">
-            {summaryLines.map((line, idx) => {
-              if (!line) return <div key={idx} className="h-1" />;
-
-              // Heading line (e.g., ### What Was Done or **What Was Done**)
-              if (/^#{1,3}\s+/.test(line) || /^\*\*[^*]+\*\*:?$/.test(line)) {
-                const headingText = line.replace(/^#{1,3}\s+/, '').replace(/\*\*/g, '').replace(/:$/, '');
-                return (
-                  <div
-                    key={idx}
-                    className="text-[11px] font-bold uppercase tracking-wider text-indigo-300 pt-1"
-                  >
-                    {headingText}
-                  </div>
-                );
-              }
-
-              // Bullet point line
-              if (/^[-*•]\s+/.test(line)) {
-                const bulletBody = line.replace(/^[-*•]\s+/, '');
-                return (
-                  <div key={idx} className="flex items-start gap-2 pl-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 mt-1.5 shrink-0" />
-                    <div className="flex-1">{renderInlineBold(bulletBody)}</div>
-                  </div>
-                );
-              }
-
-              return <div key={idx}>{renderInlineBold(line)}</div>;
-            })}
-
+            {renderStructuredLines(summaryLines)}
             {isStreamingMessage && (
               <span
                 aria-hidden="true"
@@ -432,7 +675,7 @@ export function ChatPane({
           </div>
         )}
 
-        {/* Clickable Next Suggestion Cards */}
+        {/* 5. Clickable Next Suggestion Cards */}
         {suggestions.length > 0 && !isStreamingMessage && (
           <div className="pt-1 space-y-1.5">
             <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-400">
@@ -489,35 +732,14 @@ export function ChatPane({
             )}
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={onOpenDatabase}
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium border transition-colors ${
-                dbConfig.provider !== 'none'
-                  ? 'bg-emerald-600/20 border-emerald-500/40 text-emerald-300'
-                  : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-200'
-              }`}
-              title="Connect Supabase or Firebase Database"
-            >
-              <Database className="w-3.5 h-3.5 text-emerald-400" />
-              <span>
-                {dbConfig.provider === 'supabase'
-                  ? 'Supabase'
-                  : dbConfig.provider === 'firebase'
-                  ? 'Firebase'
-                  : 'Database'}
-              </span>
-            </button>
-
-            <button
-              onClick={onOpenKeys}
-              className="flex items-center gap-1 px-2 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200"
-              title="Configure AI Provider API Keys"
-            >
-              <Key className="w-3.5 h-3.5 text-indigo-400" />
-              <span>Keys</span>
-            </button>
-          </div>
+          <button
+            onClick={onOpenKeys}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200 shrink-0"
+            title="Configure AI Provider API Keys"
+          >
+            <Key className="w-3.5 h-3.5 text-indigo-400" />
+            <span>API Keys</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-1.5">
@@ -578,16 +800,16 @@ export function ChatPane({
             <button
               onClick={() =>
                 onSendMessage(
-                  'Create an interactive Markdown previewer and JSON formatter tool with copy buttons.'
+                  'Build a full-stack SaaS customer CRM and order tracker with user login, order status management, and analytics.'
                 )
               }
               className="group block text-left w-full p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 hover:border-indigo-500/50 text-zinc-200 transition-colors"
             >
               <div className="font-semibold text-zinc-100 group-hover:text-indigo-300">
-                Developer Utility Suite
+                Full-Stack CRM &amp; Order Tracker
               </div>
               <div className="text-[11px] text-zinc-400 mt-0.5">
-                Live Markdown previewer and JSON formatter with one-click copy
+                Plans architecture first and prompts for database connection when needed
               </div>
             </button>
           </div>
@@ -612,7 +834,7 @@ export function ChatPane({
             >
               {msg.role === 'user'
                 ? renderUserContent(msg.content)
-                : renderAssistantContent(msg.content, isStreamingMessage)}
+                : renderAssistantContent(msg.content, isStreamingMessage, idx)}
 
               {snapshot && (
                 <div className="mt-2.5 pt-2 border-t border-zinc-800/90 flex items-center justify-between gap-2">

@@ -1,11 +1,14 @@
-import { ProjectDatabaseConfig } from '../components/DatabaseModal';
+export interface ConnectedDatabaseInfo {
+  provider: string;
+  envVars: Record<string, string>;
+}
 
 export function buildSystemPrompt(
   fileList: string[],
   activeFileContent?: { path: string; content: string },
   customInstructions?: string,
   appEntryContent?: string,
-  dbConfig?: ProjectDatabaseConfig
+  connectedDatabases?: ConnectedDatabaseInfo[]
 ): string {
   const activeContext =
     activeFileContent && activeFileContent.path !== 'src/App.tsx'
@@ -20,45 +23,56 @@ export function buildSystemPrompt(
     ? `\nUSER CUSTOM SYSTEM INSTRUCTIONS:\n${customInstructions.trim()}\n`
     : '';
 
-  let dbContextBlock = '';
-  if (dbConfig && dbConfig.provider === 'supabase') {
-    dbContextBlock = `\nCONNECTED DATABASE: Supabase (PostgreSQL)
-- Environment variables \`VITE_SUPABASE_URL\` and \`VITE_SUPABASE_ANON_KEY\` are already configured in \`.env\`.
-- Import the pre-configured client from \`./lib/supabase\` (\`import { supabase } from './lib/supabase'\`).
-- Use real Supabase queries (\`supabase.from(...).select/insert/update/delete\`) with graceful fallback/error handling, and include any needed SQL table setup in your summary.\n`;
-  } else if (dbConfig && dbConfig.provider === 'firebase') {
-    dbContextBlock = `\nCONNECTED DATABASE: Firebase (Firestore & Auth)
-- Environment variables (\`VITE_FIREBASE_API_KEY\`, \`VITE_FIREBASE_PROJECT_ID\`, etc.) are already configured in \`.env\`.
-- Import the pre-configured client from \`./lib/firebase\` (\`import { db, auth } from './lib/firebase'\`).
-- Use real Firestore queries (\`collection\`, \`getDocs\`, \`addDoc\`, \`onSnapshot\`) with graceful error handling.\n`;
-  }
+  const dbContextBlock =
+    connectedDatabases && connectedDatabases.length > 0
+      ? `\nCONNECTED DATABASES IN THIS PROJECT:\n${connectedDatabases
+          .map(
+            (db) =>
+              `- **${db.provider}** (configured in \`.env\` with keys: ${Object.keys(db.envVars).join(', ')})`
+          )
+          .join('\n')}\nUse the already-configured client in \`src/lib/\` for real database operations.\n`
+      : '';
 
   return `You are an expert full-stack React + TypeScript + Tailwind CSS engineer inside Open AI Studio (an in-browser WebContainer).
 
-CRITICAL EXECUTION RULES (NEVER VIOLATE):
-1. NEVER run exploratory shell commands like \`ls\`, \`ls -la\`, \`cat\`, \`pwd\`, or \`find\`. You ALREADY have the full project file list and \`src/App.tsx\` code below.
-2. In your VERY FIRST response, immediately write or update the actual application code using \`<studioAction type="file" ...>\` or \`<studioAction type="diff" ...>\`. Do NOT stop after a shell command without writing the code.
-3. Keep generated files concise, well-structured, and under ~320 lines per file so the response finishes rapidly and ALWAYS closes the \`</studioAction>\` tag cleanly.
-4. For complete redesigns or major features, prefer \`<studioAction type="file" filePath="src/App.tsx">\` with the complete updated file.
-5. Keep Tailwind CSS at v3 (^3.4.15). NEVER install native C++ packages (better-sqlite3, bcrypt, sharp, canvas).
-6. Only use \`<studioAction type="shell">npm install <pkg></studioAction>\` if you actually added a new package to \`package.json\`.
-7. AFTER all \`<studioAction>\` tags are closed, ALWAYS output a well-organized summary using bold headings and bullet points, followed by **Suggested Next Tweaks** formatted cleanly so the UI can render them as clickable cards. Never output raw code fences outside \`<studioAction>\` tags.
+CRITICAL EXECUTION WORKFLOW (NEVER VIOLATE):
+1. **ALWAYS PLAN FIRST:** Before writing any \`<studioAction>\` tags, ALWAYS begin your response with a concise, well-structured **Implementation Plan** section using bold headings and bullet points describing:
+   - **Architecture & Layout:** Pages, sections, and UI components you will build.
+   - **State & Data Flow:** How user interactions, state, and persistence work.
+   - **Database Assessment:** Whether the app is purely frontend/localStorage or benefits from a real database (Supabase, Firebase, PocketBase, etc.).
+2. **NEVER RUN EXPLORATORY COMMANDS:** Never run \`ls\`, \`ls -la\`, \`cat\`, \`pwd\`, or \`find\`. You ALREADY have the full project file list and \`src/App.tsx\` code below.
+3. **WRITE WORKING CODE IMMEDIATELY:** Right after your Implementation Plan, output the working application files using \`<studioAction type="file" ...>\` or \`<studioAction type="diff" ...>\`. Keep files concise (~320 lines max per file) and ALWAYS close \`</studioAction>\` tags cleanly.
+4. **IN-CHAT DATABASE REQUEST (WHEN NEEDED):** If the user's app genuinely needs a real database (e.g., multi-user auth, e-commerce orders, SaaS dashboard, booking system, social feed, cloud sync) AND no database is connected yet:
+   - Build a clean working UI first (using local mock/state fallback so Live Preview works immediately without crashing).
+   - Include a \`<studioDatabaseRequest>\` block in your response recommending the best database for this specific project (e.g., \`supabase\`, \`firebase\`, \`pocketbase\`, or \`custom\`) and listing the exact credentials needed. The chat UI will render an interactive form card for the user right in the conversation!
+5. **END WITH SUMMARY & NEXT TWEAKS:** After all \`<studioAction>\` tags, write **What Was Done** and **Suggested Next Tweaks** (3 clickable bullet points). Never put raw markdown code fences outside \`<studioAction>\` tags.
+6. **ENVIRONMENT CONSTRAINTS:** Keep Tailwind CSS at v3 (^3.4.15). NEVER install native C++ packages (better-sqlite3, bcrypt, sharp, canvas). Only run \`<studioAction type="shell">npm install <pkg></studioAction>\` if you added a new package to \`package.json\`.
 
 OUTPUT FORMAT (STRICT):
-Wrap every file change in \`<studioAction>\` tags, then end with this exact organized structure:
+
+**Implementation Plan**
+- **UI & Components:** What screens/sections will be created.
+- **Data & State:** How data is managed and persisted.
+- **Database Decision:** Why a database is or isn't needed for this app.
 
 <studioAction type="file" filePath="src/App.tsx">
 // complete working TypeScript/React code here
 </studioAction>
 
+<!-- ONLY include <studioDatabaseRequest> when the project needs a real database and none is connected yet -->
+<studioDatabaseRequest provider="supabase" title="Connect Supabase (PostgreSQL)" reason="Recommended for relational tables, auth, and instant REST APIs for this project.">
+  <field key="VITE_SUPABASE_URL" label="Supabase Project URL" placeholder="https://xyzcompany.supabase.co" />
+  <field key="VITE_SUPABASE_ANON_KEY" label="Supabase Anon Public Key" placeholder="eyJhbGciOiJIUzI1NiIs..." secret="true" />
+</studioDatabaseRequest>
+
 **What Was Done**
-- **Core Layout & UI:** Brief explanation of what was built.
-- **Interactive Features:** Brief explanation of state, forms, or database wiring.
+- **Feature 1:** Brief explanation of what was built.
+- **Feature 2:** Brief explanation of interactive logic.
 
 **Suggested Next Tweaks**
-- **Connect Supabase Database:** Add persistent PostgreSQL storage and real-time sync.
-- **Add User Authentication:** Include login/signup modal with protected user actions.
-- **Enhance Mobile Responsiveness & Animations:** Polish transitions, dark/light accents, and micro-interactions.
+- **Tweak Title 1:** Short actionable description.
+- **Tweak Title 2:** Short actionable description.
+- **Tweak Title 3:** Short actionable description.
 
 PROJECT FILES:
 ${fileList.map((f) => `- ${f}`).join('\n')}
