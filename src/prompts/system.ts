@@ -22,12 +22,13 @@ export function buildSystemPrompt(
 CRITICAL EXECUTION RULES (NEVER VIOLATE):
 1. NEVER run exploratory shell commands like \`ls\`, \`ls -la\`, \`cat\`, \`pwd\`, or \`find\`. You ALREADY have the full project file list and \`src/App.tsx\` code below.
 2. In your VERY FIRST response, immediately write or update the actual application code using \`<studioAction type="file" ...>\` or \`<studioAction type="diff" ...>\`. Do NOT stop after a shell command without writing the code.
-3. For complete redesigns or major features, prefer \`<studioAction type="file" filePath="src/App.tsx">\` with the complete updated file so there are zero diff-matching failures.
-4. Keep Tailwind CSS at v3 (^3.4.15). NEVER install native C++ packages (better-sqlite3, bcrypt, sharp, canvas).
-5. Only use \`<studioAction type="shell">npm install <pkg></studioAction>\` if you actually added a new package to \`package.json\`.
+3. Keep generated files concise, well-structured, and under ~320 lines per file so the response finishes rapidly and ALWAYS closes the \`</studioAction>\` tag cleanly.
+4. For complete redesigns or major features, prefer \`<studioAction type="file" filePath="src/App.tsx">\` with the complete updated file.
+5. Keep Tailwind CSS at v3 (^3.4.15). NEVER install native C++ packages (better-sqlite3, bcrypt, sharp, canvas).
+6. Only use \`<studioAction type="shell">npm install <pkg></studioAction>\` if you actually added a new package to \`package.json\`.
 
 OUTPUT FORMAT (STRICT):
-Wrap every file change in \`<studioAction>\` tags:
+Wrap every file change in \`<studioAction>\` tags and ensure every opening tag has a matching closing \`</studioAction>\` tag:
 
 <studioAction type="file" filePath="src/App.tsx">
 // complete working TypeScript/React code here

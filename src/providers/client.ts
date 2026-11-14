@@ -22,6 +22,7 @@ export interface StreamOptions {
 }
 
 const KEYS_STORAGE_KEY = 'open_ai_studio_api_keys';
+const STREAM_IDLE_TIMEOUT_MS = 20000;
 
 export function getStoredApiKeys(): Record<string, string> {
   try {
@@ -47,7 +48,7 @@ export async function streamChatCompletion({
   customModelId,
   messages,
   temperature = 0.2,
-  maxTokens = 8192,
+  maxTokens = 16384,
   topP = 0.95,
   onToken,
   signal,
@@ -108,8 +109,41 @@ export async function streamChatCompletion({
   let reasoningChars = 0;
   let buffer = '';
 
+  const readWithTimeout = async () => {
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reader.cancel().catch(() => {});
+            reject(new Error('STREAM_STALLED'));
+          }, STREAM_IDLE_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+    }
+  };
+
   while (true) {
-    const { done, value } = await reader.read();
+    let chunkResult: ReadableStreamReadResult<Uint8Array>;
+    try {
+      chunkResult = await readWithTimeout();
+    } catch (err) {
+      if (err instanceof Error && err.message === 'STREAM_STALLED') {
+        if (fullText.trim()) {
+          // Return partial output instead of hanging forever
+          break;
+        }
+        throw new Error(
+          `${provider.name} stream timed out after 20s with no response. Please try again or switch to Gemini 3.5 Flash-Lite.`
+        );
+      }
+      throw err;
+    }
+
+    const { done, value } = chunkResult;
     if (done) break;
 
     buffer += decoder.decode(value, { stream: true });
@@ -141,14 +175,13 @@ export async function streamChatCompletion({
         if (err instanceof Error && err.message.includes('Stream Error:')) {
           throw err;
         }
-        // Ignore partial JSON chunks until next line arrives
       }
     }
   }
 
   if (!fullText.trim()) {
     throw new Error(
-      `${provider.name} returned an empty response. Try switching the model dropdown to "OpenRouter Auto Free Router" or "Google AI Studio (Free) -> Gemini 2.5 Flash".`
+      `${provider.name} returned an empty response. Try switching to "Gemini 3.5 Flash-Lite (Fast)" or "OpenRouter Auto Free Router".`
     );
   }
 
