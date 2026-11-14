@@ -61,23 +61,37 @@ export async function streamChatCompletion({
 
   const targetModel = customModelId?.trim() ? customModelId.trim() : modelId;
 
-  const response = await fetch(`${provider.baseUrl}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-      ...(provider.extraHeaders || {}),
-    },
-    body: JSON.stringify({
-      model: targetModel,
-      messages,
-      stream: true,
-      temperature,
-      max_tokens: maxTokens,
-      top_p: topP,
-    }),
-    signal,
-  });
+  const makeRequest = (chosenModel: string) =>
+    fetch(`${provider.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        ...(provider.extraHeaders || {}),
+      },
+      body: JSON.stringify({
+        model: chosenModel,
+        messages,
+        stream: true,
+        temperature,
+        max_tokens: maxTokens,
+        top_p: topP,
+      }),
+      signal,
+    });
+
+  let response = await makeRequest(targetModel);
+
+  // Automatic fallback to openrouter/free if a specific :free slug is deprecated (404) or rate-limited (429)
+  if (
+    !response.ok &&
+    providerId === 'openrouter' &&
+    !customModelId?.trim() &&
+    targetModel !== 'openrouter/free' &&
+    (response.status === 404 || response.status === 429)
+  ) {
+    response = await makeRequest('openrouter/free');
+  }
 
   if (!response.ok) {
     const errorText = await response.text();
