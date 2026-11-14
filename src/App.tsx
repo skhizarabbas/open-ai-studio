@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Code2, Download, Eye, FileCode, RefreshCw, Save, Sliders } from 'lucide-react';
+import { Code2, Download, Eye, FileCode, Layers, RefreshCw, Save, Sliders } from 'lucide-react';
 import { ChatPane } from './components/ChatPane';
 import { TerminalPane } from './components/TerminalPane';
 import { ApiKeyModal } from './components/ApiKeyModal';
+import { StarterGalleryModal } from './components/StarterGalleryModal';
 import {
   DEFAULT_RUN_SETTINGS,
   RunSettings,
@@ -15,12 +16,13 @@ import {
   mountFiles,
   onServerReady,
   readFile,
+  resetProjectFiles,
   runShellCommand,
   writeFile,
 } from './engine/webcontainer';
 import { executeStudioActions, parseStudioActions } from './engine/parser';
 import { downloadProjectAsZip } from './engine/export';
-import { STARTER_TEMPLATE } from './prompts/templates';
+import { STARTER_GALLERY, STARTER_TEMPLATE, StarterAppTemplate } from './prompts/templates';
 import { buildSystemPrompt } from './prompts/system';
 
 const RUN_SETTINGS_STORAGE_KEY = 'open_ai_studio_run_settings';
@@ -39,6 +41,8 @@ export default function App() {
   const [modelId, setModelId] = useState(FREE_PROVIDERS[0].models[0].id);
   const [customModelId, setCustomModelId] = useState('');
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+  const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [activeTemplateId, setActiveTemplateId] = useState(STARTER_GALLERY[0].id);
 
   const [runSettings, setRunSettings] = useState<RunSettings>(loadStoredRunSettings);
   const [isRunSettingsOpen, setIsRunSettingsOpen] = useState(true);
@@ -107,6 +111,30 @@ export default function App() {
       }
     })();
   }, [openFile, refreshFiles]);
+
+  const handleSelectTemplate = async (template: StarterAppTemplate) => {
+    try {
+      setLastError(null);
+      setActiveTemplateId(template.id);
+      setMessages([]);
+      terminalWriteRef.current?.(`\r\n--- Loading starter: ${template.name} ---\r\n`);
+      await resetProjectFiles();
+      await mountFiles(template.tree);
+      await refreshFiles();
+      await openFile(template.entryFile);
+
+      terminalWriteRef.current?.('\r\n$ npm install\r\n');
+      const installRes = await runShellCommand('npm install', (d) => terminalWriteRef.current?.(d));
+      if (installRes.exitCode === 0) {
+        terminalWriteRef.current?.(`\r\n$ ${template.startCommand}\r\n`);
+        runShellCommand(template.startCommand, (d) => terminalWriteRef.current?.(d));
+        setPreviewUrl((u) => (u ? `${u.split('?')[0]}?t=${Date.now()}` : u));
+        setActiveTab('preview');
+      }
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   const handleSaveManualEdit = async () => {
     if (!selectedFile) return;
@@ -200,6 +228,13 @@ export default function App() {
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-zinc-950 text-zinc-100">
       <ApiKeyModal isOpen={isKeyModalOpen} onClose={() => setIsKeyModalOpen(false)} />
+      <StarterGalleryModal
+        isOpen={isGalleryOpen}
+        onClose={() => setIsGalleryOpen(false)}
+        activeTemplateId={activeTemplateId}
+        onSelectTemplate={handleSelectTemplate}
+        onUsePrompt={(prompt) => handleSendMessage(prompt)}
+      />
 
       <ChatPane
         providerId={providerId}
@@ -220,24 +255,35 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Toolbar */}
         <div className="h-11 border-b border-zinc-800 px-3 flex items-center justify-between bg-zinc-900/40">
-          <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
+              <button
+                onClick={() => setActiveTab('preview')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium ${
+                  activeTab === 'preview' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Live Preview
+              </button>
+              <button
+                onClick={() => setActiveTab('code')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium ${
+                  activeTab === 'code' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                Code
+              </button>
+            </div>
+
             <button
-              onClick={() => setActiveTab('preview')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium ${
-                activeTab === 'preview' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
-              }`}
+              onClick={() => setIsGalleryOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 border border-zinc-700/80 text-xs text-zinc-200"
+              title="Open Starter App Gallery & Prompt Presets"
             >
-              <Eye className="w-3.5 h-3.5" />
-              Live Preview
-            </button>
-            <button
-              onClick={() => setActiveTab('code')}
-              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium ${
-                activeTab === 'code' ? 'bg-indigo-600 text-white' : 'text-zinc-400 hover:text-zinc-200'
-              }`}
-            >
-              <Code2 className="w-3.5 h-3.5" />
-              Code
+              <Layers className="w-3.5 h-3.5 text-indigo-400" />
+              Gallery
             </button>
           </div>
 
@@ -252,7 +298,7 @@ export default function App() {
               </button>
             ) : (
               <div className="flex items-center gap-2 text-xs text-zinc-400">
-                <span className="truncate max-w-[220px]">{previewUrl || 'Starting dev server...'}</span>
+                <span className="truncate max-w-[200px]">{previewUrl || 'Starting dev server...'}</span>
                 {previewUrl && (
                   <button
                     onClick={() => setPreviewUrl((u) => `${u.split('?')[0]}?t=${Date.now()}`)}

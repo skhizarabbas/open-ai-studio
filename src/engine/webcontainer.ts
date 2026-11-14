@@ -20,6 +20,15 @@ export async function mountFiles(tree: FileSystemTree): Promise<void> {
   await wc.mount(tree);
 }
 
+export async function resetProjectFiles(): Promise<void> {
+  const wc = await getWebContainer();
+  const entries = await wc.fs.readdir('.', { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.name === 'node_modules' || entry.name === '.git') continue;
+    await wc.fs.rm(entry.name, { recursive: true, force: true });
+  }
+}
+
 export async function writeFile(filePath: string, content: string): Promise<void> {
   const wc = await getWebContainer();
   const cleanPath = filePath.replace(/^\/+/, '');
