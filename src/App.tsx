@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Code2, Download, Eye, FileCode, Layers, RefreshCw, Save, Sliders } from 'lucide-react';
-import { ChatPane } from './components/ChatPane';
+import { ChatPane, ProjectSnapshot } from './components/ChatPane';
 import { TerminalPane } from './components/TerminalPane';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { StarterGalleryModal } from './components/StarterGalleryModal';
@@ -12,11 +12,13 @@ import {
 import { ChatContentPart, ChatMessage, streamChatCompletion } from './providers/client';
 import { FREE_PROVIDERS } from './providers/models';
 import {
+  captureProjectSnapshot,
   listProjectFiles,
   mountFiles,
   onServerReady,
   readFile,
   resetProjectFiles,
+  restoreProjectSnapshot,
   runShellCommand,
   writeFile,
 } from './engine/webcontainer';
@@ -48,6 +50,10 @@ export default function App() {
   const [isRunSettingsOpen, setIsRunSettingsOpen] = useState(true);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [snapshotsByMessageIndex, setSnapshotsByMessageIndex] = useState<Record<number, ProjectSnapshot>>({});
+  const [activeSnapshotId, setActiveSnapshotId] = useState<string | null>(null);
+  const versionCounterRef = useRef(0);
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
 
@@ -117,6 +123,10 @@ export default function App() {
       setLastError(null);
       setActiveTemplateId(template.id);
       setMessages([]);
+      setSnapshotsByMessageIndex({});
+      setActiveSnapshotId(null);
+      versionCounterRef.current = 0;
+
       terminalWriteRef.current?.(`\r\n--- Loading starter: ${template.name} ---\r\n`);
       await resetProjectFiles();
       await mountFiles(template.tree);
@@ -131,6 +141,27 @@ export default function App() {
         setPreviewUrl((u) => (u ? `${u.split('?')[0]}?t=${Date.now()}` : u));
         setActiveTab('preview');
       }
+    } catch (err) {
+      setLastError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleRestoreSnapshot = async (snapshot: ProjectSnapshot) => {
+    try {
+      setLastError(null);
+      terminalWriteRef.current?.(`\r\n--- Restoring snapshot v${snapshot.version} (${snapshot.timestamp}) ---\r\n`);
+      await restoreProjectSnapshot(snapshot.files);
+      const updatedFiles = await listProjectFiles();
+      setFiles(updatedFiles);
+
+      if (selectedFile && snapshot.files[selectedFile] !== undefined) {
+        setEditorContent(snapshot.files[selectedFile]);
+      } else if (updatedFiles.length > 0) {
+        await openFile(updatedFiles[0]);
+      }
+
+      setActiveSnapshotId(snapshot.id);
+      setPreviewUrl((u) => (u ? `${u.split('?')[0]}?t=${Date.now()}` : u));
     } catch (err) {
       setLastError(err instanceof Error ? err.message : String(err));
     }
@@ -157,6 +188,7 @@ export default function App() {
 
     const userMsg: ChatMessage = { role: 'user', content: userContent };
     const updatedHistory = [...messages, userMsg];
+    const assistantMsgIndex = updatedHistory.length;
     setMessages([...updatedHistory, { role: 'assistant', content: '' }]);
     setIsGenerating(true);
 
@@ -207,6 +239,23 @@ export default function App() {
         } else {
           await refreshFiles();
           setActiveTab('preview');
+
+          // Capture snapshot after successful file changes
+          const snapshotFiles = await captureProjectSnapshot();
+          versionCounterRef.current += 1;
+          const snapId = `snap_${Date.now()}_${versionCounterRef.current}`;
+          const newSnapshot: ProjectSnapshot = {
+            id: snapId,
+            version: versionCounterRef.current,
+            label: userPrompt.slice(0, 48),
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            files: snapshotFiles,
+          };
+          setSnapshotsByMessageIndex((prev) => ({
+            ...prev,
+            [assistantMsgIndex]: newSnapshot,
+          }));
+          setActiveSnapshotId(snapId);
         }
       }
     } catch (err: unknown) {
@@ -244,6 +293,9 @@ export default function App() {
         customModelId={customModelId}
         setCustomModelId={setCustomModelId}
         messages={messages}
+        snapshotsByMessageIndex={snapshotsByMessageIndex}
+        activeSnapshotId={activeSnapshotId}
+        onRestoreSnapshot={handleRestoreSnapshot}
         isGenerating={isGenerating}
         lastError={lastError}
         onSendMessage={handleSendMessage}

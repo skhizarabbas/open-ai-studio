@@ -1,7 +1,15 @@
 import React, { useRef, useState } from 'react';
-import { Send, Square, Key, Wrench, AlertTriangle, ImagePlus, X } from 'lucide-react';
+import { Send, Square, Key, Wrench, AlertTriangle, ImagePlus, X, History, Check } from 'lucide-react';
 import { FREE_PROVIDERS } from '../providers/models';
 import { ChatMessage } from '../providers/client';
+
+export interface ProjectSnapshot {
+  id: string;
+  version: number;
+  label: string;
+  timestamp: string;
+  files: Record<string, string>;
+}
 
 interface ChatPaneProps {
   providerId: string;
@@ -11,6 +19,9 @@ interface ChatPaneProps {
   customModelId: string;
   setCustomModelId: (id: string) => void;
   messages: ChatMessage[];
+  snapshotsByMessageIndex: Record<number, ProjectSnapshot>;
+  activeSnapshotId: string | null;
+  onRestoreSnapshot: (snapshot: ProjectSnapshot) => void;
   isGenerating: boolean;
   lastError: string | null;
   onSendMessage: (prompt: string, images?: string[]) => void;
@@ -61,6 +72,9 @@ export function ChatPane({
   customModelId,
   setCustomModelId,
   messages,
+  snapshotsByMessageIndex,
+  activeSnapshotId,
+  onRestoreSnapshot,
   isGenerating,
   lastError,
   onSendMessage,
@@ -230,18 +244,54 @@ export function ChatPane({
           </div>
         )}
 
-        {messages.map((msg, idx) => (
-          <div
-            key={idx}
-            className={`p-3 rounded-lg text-xs leading-relaxed whitespace-pre-wrap ${
-              msg.role === 'user'
-                ? 'bg-indigo-600/20 border border-indigo-500/30 text-zinc-100 ml-4'
-                : 'bg-zinc-950 border border-zinc-800 text-zinc-300 mr-2'
-            }`}
-          >
-            {renderMessageContent(msg.content)}
-          </div>
-        ))}
+        {messages.map((msg, idx) => {
+          const snapshot = snapshotsByMessageIndex[idx];
+          const isCurrentVersion = snapshot && snapshot.id === activeSnapshotId;
+
+          return (
+            <div
+              key={idx}
+              className={`p-3 rounded-lg text-xs leading-relaxed whitespace-pre-wrap ${
+                msg.role === 'user'
+                  ? 'bg-indigo-600/20 border border-indigo-500/30 text-zinc-100 ml-4'
+                  : 'bg-zinc-950 border border-zinc-800 text-zinc-300 mr-2'
+              }`}
+            >
+              {renderMessageContent(msg.content)}
+
+              {snapshot && (
+                <div className="mt-2.5 pt-2 border-t border-zinc-800/90 flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
+                    <History className="w-3 h-3 text-indigo-400" />
+                    <span>
+                      v{snapshot.version} &middot; {snapshot.timestamp}
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isGenerating || isCurrentVersion}
+                    onClick={() => onRestoreSnapshot(snapshot)}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                      isCurrentVersion
+                        ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 cursor-default'
+                        : 'bg-zinc-800 hover:bg-indigo-600 text-zinc-200 hover:text-white'
+                    }`}
+                    title="Restore project files to this snapshot"
+                  >
+                    {isCurrentVersion ? (
+                      <>
+                        <Check className="w-3 h-3" /> Active
+                      </>
+                    ) : (
+                      <>Restore v{snapshot.version}</>
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Error Self-Healing Banner */}

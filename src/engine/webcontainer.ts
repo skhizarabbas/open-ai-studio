@@ -65,6 +65,22 @@ export async function listProjectFiles(dir = ''): Promise<string[]> {
   return results.sort();
 }
 
+export async function captureProjectSnapshot(): Promise<Record<string, string>> {
+  const paths = await listProjectFiles();
+  const snapshot: Record<string, string> = {};
+  for (const p of paths) {
+    snapshot[p] = await readFile(p);
+  }
+  return snapshot;
+}
+
+export async function restoreProjectSnapshot(snapshot: Record<string, string>): Promise<void> {
+  await resetProjectFiles();
+  for (const [filePath, content] of Object.entries(snapshot)) {
+    await writeFile(filePath, content);
+  }
+}
+
 export async function runShellCommand(
   command: string,
   onOutput?: (data: string) => void
