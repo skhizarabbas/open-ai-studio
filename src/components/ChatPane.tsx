@@ -10,6 +10,10 @@ import {
   History,
   Check,
   ArrowDown,
+  FileCode2,
+  Terminal,
+  Loader2,
+  CheckCircle2,
 } from 'lucide-react';
 import { FREE_PROVIDERS } from '../providers/models';
 import { ChatMessage } from '../providers/client';
@@ -20,6 +24,85 @@ export interface ProjectSnapshot {
   label: string;
   timestamp: string;
   files: Record<string, string>;
+}
+
+interface ParsedTaskItem {
+  type: 'file' | 'diff' | 'shell';
+  label: string;
+  completed: boolean;
+}
+
+interface ParsedAssistantDisplay {
+  tasks: ParsedTaskItem[];
+  summaryText: string;
+}
+
+function parseAssistantDisplay(rawText: string, isStreaming: boolean): ParsedAssistantDisplay {
+  const tasks: ParsedTaskItem[] = [];
+
+  // 1. Extract all completed <studioAction ...>...</studioAction> blocks
+  const closedRegex = /<studioAction\s+([^>]+)>([\s\S]*?)<\/studioAction>/g;
+  let match: RegExpExecArray | null;
+  while ((match = closedRegex.exec(rawText)) !== null) {
+    const attrs = match[1];
+    const body = match[2].trim();
+    const typeMatch = attrs.match(/type=["']([^"']+)["']/);
+    const pathMatch = attrs.match(/filePath=["']([^"']+)["']/);
+    const actionType = (typeMatch?.[1] || 'file') as 'file' | 'diff' | 'shell';
+    const filePath = pathMatch?.[1] || '';
+
+    if (actionType === 'shell') {
+      tasks.push({ type: 'shell', label: `Ran: ${body}`, completed: true });
+    } else if (actionType === 'diff') {
+      tasks.push({ type: 'diff', label: `Updated ${filePath || 'file'}`, completed: true });
+    } else {
+      tasks.push({ type: 'file', label: `Built ${filePath || 'file'}`, completed: true });
+    }
+  }
+
+  // Strip completed blocks to inspect remainder
+  let remainder = rawText.replace(/<studioAction\s+[^>]+>[\s\S]*?<\/studioAction>/g, '');
+
+  // 2. Check if there is an in-progress (unclosed) <studioAction ...> currently streaming
+  const openTagMatch = remainder.match(/<studioAction\s+([^>]*)>([\s\S]*)$/);
+  if (openTagMatch) {
+    const attrs = openTagMatch[1];
+    const partialBody = openTagMatch[2].trim();
+    const typeMatch = attrs.match(/type=["']([^"']+)["']/);
+    const pathMatch = attrs.match(/filePath=["']([^"']+)["']/);
+    const actionType = (typeMatch?.[1] || 'file') as 'file' | 'diff' | 'shell';
+    const filePath = pathMatch?.[1] || '';
+
+    if (actionType === 'shell') {
+      tasks.push({
+        type: 'shell',
+        label: partialBody ? `Running: ${partialBody}` : 'Preparing command...',
+        completed: !isStreaming,
+      });
+    } else if (actionType === 'diff') {
+      tasks.push({
+        type: 'diff',
+        label: `Editing ${filePath || 'code'}...`,
+        completed: !isStreaming,
+      });
+    } else {
+      tasks.push({
+        type: 'file',
+        label: `Building ${filePath || 'app code'}...`,
+        completed: !isStreaming,
+      });
+    }
+
+    remainder = remainder.slice(0, openTagMatch.index);
+  }
+
+  // Strip any partial opening tag fragment like "<studioAct..."
+  remainder = remainder.replace(/<studioAction[^>]*$/g, '').trim();
+
+  return {
+    tasks,
+    summaryText: remainder,
+  };
 }
 
 interface ChatPaneProps {
@@ -107,7 +190,6 @@ export function ChatPane({
     bottomAnchorRef.current?.scrollIntoView({ behavior, block: 'end' });
   };
 
-  // Detect if user manually scrolled up to read earlier messages
   const handleScroll = () => {
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -115,7 +197,6 @@ export function ChatPane({
     setUserScrolledUp(distanceFromBottom > 80);
   };
 
-  // Auto-scroll live as tokens stream in
   useEffect(() => {
     if (!userScrolledUp) {
       scrollToBottom('auto');
@@ -176,27 +257,9 @@ export function ChatPane({
     requestAnimationFrame(() => scrollToBottom('smooth'));
   };
 
-  const renderMessageContent = (content: ChatMessage['content'], isStreamingMessage: boolean) => {
+  const renderUserContent = (content: ChatMessage['content']) => {
     if (typeof content === 'string') {
-      if (!content && isStreamingMessage) {
-        return (
-          <span className="inline-flex items-center gap-1.5 text-indigo-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
-            Thinking &amp; generating code...
-          </span>
-        );
-      }
-      return (
-        <>
-          <span>{content}</span>
-          {isStreamingMessage && (
-            <span
-              aria-hidden="true"
-              className="inline-block w-1.5 h-3.5 ml-0.5 align-middle bg-indigo-400 animate-pulse"
-            />
-          )}
-        </>
-      );
+      return <span>{content}</span>;
     }
 
     return (
@@ -222,6 +285,71 @@ export function ChatPane({
     );
   };
 
+  const renderAssistantContent = (content: ChatMessage['content'], isStreamingMessage: boolean) => {
+    const rawText = typeof content === 'string' ? content : '';
+    const { tasks, summaryText } = parseAssistantDisplay(rawText, isStreamingMessage);
+
+    if (!rawText && isStreamingMessage) {
+      return (
+        <span className="inline-flex items-center gap-2 text-indigo-300">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Planning your app...
+        </span>
+      );
+    }
+
+    return (
+      <div className="space-y-2.5">
+        {/* Clean Task Progress List (hides raw code) */}
+        {tasks.length > 0 && (
+          <div className="space-y-1.5">
+            {tasks.map((task, idx) => (
+              <div
+                key={idx}
+                className={`flex items-center gap-2 px-2.5 py-1.5 rounded-md border text-[11px] font-medium ${
+                  task.completed
+                    ? 'bg-zinc-900/90 border-zinc-800 text-zinc-200'
+                    : 'bg-indigo-950/40 border-indigo-500/40 text-indigo-200'
+                }`}
+              >
+                {!task.completed ? (
+                  <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin shrink-0" />
+                ) : task.type === 'shell' ? (
+                  <Terminal className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                )}
+                <span className="truncate">{task.label}</span>
+                {task.type !== 'shell' && task.completed && (
+                  <FileCode2 className="w-3 h-3 text-zinc-500 ml-auto shrink-0" />
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Work Done Summary & Next Tweaks */}
+        {summaryText && (
+          <div className="text-zinc-200 leading-relaxed whitespace-pre-wrap">
+            {summaryText}
+            {isStreamingMessage && (
+              <span
+                aria-hidden="true"
+                className="inline-block w-1.5 h-3.5 ml-0.5 align-middle bg-indigo-400 animate-pulse"
+              />
+            )}
+          </div>
+        )}
+
+        {!summaryText && isStreamingMessage && tasks.length > 0 && (
+          <div className="text-[11px] text-zinc-400 flex items-center gap-1.5">
+            <span>Applying changes to workspace...</span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className="w-full flex flex-col bg-zinc-900/50 h-full relative">
       {/* Header & Model Controls */}
@@ -232,7 +360,7 @@ export function ChatPane({
             {isGenerating && (
               <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-[10px] font-medium text-indigo-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                Streaming
+                Working
               </span>
             )}
           </div>
@@ -319,15 +447,17 @@ export function ChatPane({
           return (
             <div
               key={idx}
-              className={`p-3 rounded-lg text-xs leading-relaxed whitespace-pre-wrap break-words ${
+              className={`p-3 rounded-lg text-xs leading-relaxed break-words ${
                 msg.role === 'user'
-                  ? 'bg-indigo-600/20 border border-indigo-500/30 text-zinc-100 ml-4'
+                  ? 'bg-indigo-600/20 border border-indigo-500/30 text-zinc-100 ml-4 whitespace-pre-wrap'
                   : isStreamingMessage
                   ? 'bg-zinc-950 border border-indigo-500/40 text-zinc-200 mr-2 shadow-sm shadow-indigo-950/30'
                   : 'bg-zinc-950 border border-zinc-800 text-zinc-300 mr-2'
               }`}
             >
-              {renderMessageContent(msg.content, isStreamingMessage)}
+              {msg.role === 'user'
+                ? renderUserContent(msg.content)
+                : renderAssistantContent(msg.content, isStreamingMessage)}
 
               {snapshot && (
                 <div className="mt-2.5 pt-2 border-t border-zinc-800/90 flex items-center justify-between gap-2">
@@ -377,7 +507,7 @@ export function ChatPane({
           className="self-center mb-2 px-3 py-1 rounded-full bg-indigo-600 hover:bg-indigo-500 text-[11px] font-medium text-white shadow-lg flex items-center gap-1.5 transition-all"
         >
           <ArrowDown className="w-3 h-3" />
-          {isGenerating ? 'Follow live stream' : 'Scroll to bottom'}
+          {isGenerating ? 'Follow live progress' : 'Scroll to bottom'}
         </button>
       )}
 

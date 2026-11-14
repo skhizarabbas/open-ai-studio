@@ -231,10 +231,12 @@ export default function App() {
 
       const actions = parseStudioActions(fullResponse);
       if (actions.length > 0) {
+        let lastModifiedFile: string | null = null;
         const logs = await executeStudioActions(
           actions,
           (data) => terminalWriteRef.current?.(data),
           async (changedPath) => {
+            lastModifiedFile = changedPath;
             await refreshFiles();
             if (changedPath === selectedFile) {
               await openFile(changedPath);
@@ -247,6 +249,9 @@ export default function App() {
           setLastError(failedLog.message);
         } else {
           await refreshFiles();
+          if (lastModifiedFile) {
+            await openFile(lastModifiedFile);
+          }
           setActiveTab('preview');
 
           const snapshotFiles = await captureProjectSnapshot();
@@ -386,7 +391,7 @@ export default function App() {
             <button
               onClick={() => setIsExportModalOpen(true)}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200"
-              title="Get API Code Snippet or Push to GitHub"
+              title="Get API Code Snippet or Push Built App to GitHub"
             >
               <Code className="w-3.5 h-3.5 text-indigo-400" />
               Get Code / GitHub
@@ -394,11 +399,11 @@ export default function App() {
 
             <button
               onClick={() => downloadProjectAsZip()}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200"
-              title="Download Project ZIP"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-xs font-medium text-emerald-300"
+              title="Download Built App Source Code (.ZIP)"
             >
-              <Download className="w-3.5 h-3.5 text-indigo-400" />
-              ZIP
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              Download ZIP
             </button>
 
             <button
@@ -424,24 +429,34 @@ export default function App() {
           {activeTab === 'code' ? (
             <>
               {/* File Tree */}
-              <div className="w-56 border-r border-zinc-800 bg-zinc-950 p-2 overflow-y-auto space-y-0.5 shrink-0">
-                <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 px-2 py-1">
-                  Project Files
+              <div className="w-56 border-r border-zinc-800 bg-zinc-950 p-2 flex flex-col justify-between overflow-y-auto shrink-0">
+                <div className="space-y-0.5">
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 px-2 py-1">
+                    Built App Files
+                  </div>
+                  {files.map((file) => (
+                    <button
+                      key={file}
+                      onClick={() => openFile(file)}
+                      className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-left text-xs truncate ${
+                        selectedFile === file
+                          ? 'bg-indigo-600/20 text-indigo-300'
+                          : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
+                      }`}
+                    >
+                      <FileCode className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate">{file}</span>
+                    </button>
+                  ))}
                 </div>
-                {files.map((file) => (
-                  <button
-                    key={file}
-                    onClick={() => openFile(file)}
-                    className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded text-left text-xs truncate ${
-                      selectedFile === file
-                        ? 'bg-indigo-600/20 text-indigo-300'
-                        : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-200'
-                    }`}
-                  >
-                    <FileCode className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{file}</span>
-                  </button>
-                ))}
+
+                <button
+                  onClick={() => downloadProjectAsZip()}
+                  className="mt-3 w-full flex items-center justify-center gap-1.5 px-2.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-medium text-white transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  Download App (.ZIP)
+                </button>
               </div>
 
               {/* CodeMirror 6 Syntax-Highlighted Editor */}
