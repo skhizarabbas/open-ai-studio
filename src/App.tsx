@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Code2, Download, Eye, FileCode, Layers, RefreshCw, Save, Sliders } from 'lucide-react';
+import { Code, Code2, Download, Eye, FileCode, Layers, RefreshCw, Save, Sliders } from 'lucide-react';
 import { ChatPane, ProjectSnapshot } from './components/ChatPane';
 import { TerminalPane } from './components/TerminalPane';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { StarterGalleryModal } from './components/StarterGalleryModal';
+import { ExportCodeModal } from './components/ExportCodeModal';
 import {
   DEFAULT_RUN_SETTINGS,
   RunSettings,
@@ -44,6 +45,7 @@ export default function App() {
   const [customModelId, setCustomModelId] = useState('');
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
   const [isGalleryOpen, setIsGalleryOpen] = useState(false);
+  const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [activeTemplateId, setActiveTemplateId] = useState(STARTER_GALLERY[0].id);
 
   const [runSettings, setRunSettings] = useState<RunSettings>(loadStoredRunSettings);
@@ -240,7 +242,6 @@ export default function App() {
           await refreshFiles();
           setActiveTab('preview');
 
-          // Capture snapshot after successful file changes
           const snapshotFiles = await captureProjectSnapshot();
           versionCounterRef.current += 1;
           const snapId = `snap_${Date.now()}_${versionCounterRef.current}`;
@@ -283,6 +284,15 @@ export default function App() {
         activeTemplateId={activeTemplateId}
         onSelectTemplate={handleSelectTemplate}
         onUsePrompt={(prompt) => handleSendMessage(prompt)}
+      />
+      <ExportCodeModal
+        isOpen={isExportModalOpen}
+        onClose={() => setIsExportModalOpen(false)}
+        providerId={providerId}
+        modelId={modelId}
+        customModelId={customModelId}
+        runSettings={runSettings}
+        messages={messages}
       />
 
       <ChatPane
@@ -350,7 +360,7 @@ export default function App() {
               </button>
             ) : (
               <div className="flex items-center gap-2 text-xs text-zinc-400">
-                <span className="truncate max-w-[200px]">{previewUrl || 'Starting dev server...'}</span>
+                <span className="truncate max-w-[160px]">{previewUrl || 'Starting dev server...'}</span>
                 {previewUrl && (
                   <button
                     onClick={() => setPreviewUrl((u) => `${u.split('?')[0]}?t=${Date.now()}`)}
@@ -364,12 +374,21 @@ export default function App() {
             )}
 
             <button
+              onClick={() => setIsExportModalOpen(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200"
+              title="Get API Code Snippet or Push to GitHub"
+            >
+              <Code className="w-3.5 h-3.5 text-indigo-400" />
+              Get Code / GitHub
+            </button>
+
+            <button
               onClick={() => downloadProjectAsZip()}
               className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200"
               title="Download Project ZIP"
             >
               <Download className="w-3.5 h-3.5 text-indigo-400" />
-              Export ZIP
+              ZIP
             </button>
 
             <button
