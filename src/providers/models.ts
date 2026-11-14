@@ -12,6 +12,7 @@ export interface ProviderConfig {
   requiresKey: boolean;
   keyPlaceholder: string;
   signupUrl: string;
+  freeTierNote: string;
   extraHeaders?: Record<string, string>;
   models: ModelOption[];
 }
@@ -24,6 +25,7 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
     requiresKey: true,
     keyPlaceholder: 'AIzaSy...',
     signupUrl: 'https://aistudio.google.com/apikey',
+    freeTierNote: 'Free tier via Google AI Studio API key (no credit card required).',
     models: [
       { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Recommended)', contextWindow: 1048576, supportsVision: true },
       { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite (Fast)', contextWindow: 1048576, supportsVision: true },
@@ -38,6 +40,7 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
     requiresKey: true,
     keyPlaceholder: 'sk-or-v1-...',
     signupUrl: 'https://openrouter.ai/keys',
+    freeTierNote: 'Free :free model endpoints and openrouter/free auto-router.',
     extraHeaders: {
       'HTTP-Referer': typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5173',
       'X-Title': 'Open AI Studio',
@@ -56,6 +59,7 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
     requiresKey: true,
     keyPlaceholder: 'csk-...',
     signupUrl: 'https://cloud.cerebras.ai/',
+    freeTierNote: 'Ultra-fast inference with generous free daily token limits.',
     models: [
       { id: 'qwen-3-32b', name: 'Qwen 3 32B (Ultra-Fast)', contextWindow: 65536 },
       { id: 'llama-3.3-70b', name: 'Llama 3.3 70B', contextWindow: 65536 },
@@ -68,6 +72,7 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
     requiresKey: true,
     keyPlaceholder: 'gsk_...',
     signupUrl: 'https://console.groq.com/keys',
+    freeTierNote: 'High-speed LPU inference on Groq free developer tier.',
     models: [
       { id: 'llama-3.3-70b-versatile', name: 'Llama 3.3 70B Versatile', contextWindow: 128000 },
       { id: 'qwen/qwen3-32b', name: 'Qwen 3 32B', contextWindow: 131072 },
@@ -81,6 +86,7 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
     requiresKey: true,
     keyPlaceholder: 'Mistral API Key...',
     signupUrl: 'https://console.mistral.ai/api-keys',
+    freeTierNote: 'Free Experiment plan on La Plateforme (phone verification).',
     models: [
       { id: 'devstral-small-latest', name: 'Devstral Small (Coding)', contextWindow: 128000 },
       { id: 'codestral-latest', name: 'Codestral Latest', contextWindow: 256000 },
@@ -93,6 +99,7 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
     requiresKey: true,
     keyPlaceholder: 'nvapi-...',
     signupUrl: 'https://build.nvidia.com/',
+    freeTierNote: 'Free developer prototyping credits on NVIDIA NIM.',
     models: [
       { id: 'qwen/qwen3-coder-480b-a35b-instruct', name: 'Qwen3 Coder 480B', contextWindow: 262144 },
       { id: 'deepseek-ai/deepseek-v3.1', name: 'DeepSeek V3.1', contextWindow: 128000 },
@@ -105,6 +112,7 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
     requiresKey: false,
     keyPlaceholder: 'Not required (ollama)',
     signupUrl: 'https://ollama.com/',
+    freeTierNote: '100% local & offline. Run Ollama with OLLAMA_ORIGINS="*" set.',
     models: [
       { id: 'qwen2.5-coder:7b', name: 'Qwen 2.5 Coder 7B (Local)', contextWindow: 32768 },
       { id: 'deepseek-coder-v2:16b', name: 'DeepSeek Coder V2 16B (Local)', contextWindow: 32768 },
