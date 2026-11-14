@@ -22,6 +22,7 @@ export interface StreamOptions {
 }
 
 const KEYS_STORAGE_KEY = 'open_ai_studio_api_keys';
+const CONNECT_TIMEOUT_MS = 25000;
 const STREAM_IDLE_TIMEOUT_MS = 20000;
 
 export function getStoredApiKeys(): Record<string, string> {
@@ -40,6 +41,32 @@ export function saveApiKey(providerId: string, apiKey: string): void {
 
 export function getProviderById(providerId: string): ProviderConfig {
   return FREE_PROVIDERS.find((p) => p.id === providerId) || FREE_PROVIDERS[0];
+}
+
+function combineSignals(userSignal?: AbortSignal, timeoutMs = CONNECT_TIMEOUT_MS): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error('CONNECT_TIMEOUT')), timeoutMs);
+
+  const onUserAbort = () => controller.abort(userSignal?.reason);
+  if (userSignal) {
+    if (userSignal.aborted) {
+      clearTimeout(timer);
+      controller.abort(userSignal.reason);
+    } else {
+      userSignal.addEventListener('abort', onUserAbort, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      userSignal?.removeEventListener('abort', onUserAbort);
+    },
+  };
 }
 
 export async function streamChatCompletion({
@@ -62,26 +89,56 @@ export async function streamChatCompletion({
 
   const targetModel = customModelId?.trim() ? customModelId.trim() : modelId;
 
-  const makeRequest = (chosenModel: string) =>
-    fetch(`${provider.baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-        ...(provider.extraHeaders || {}),
-      },
-      body: JSON.stringify({
+  const makeRequest = async (chosenModel: string): Promise<Response> => {
+    const { signal: reqSignal, cleanup } = combineSignals(signal, CONNECT_TIMEOUT_MS);
+    try {
+      const payload: Record<string, unknown> = {
         model: chosenModel,
         messages,
         stream: true,
         temperature,
         max_tokens: maxTokens,
         top_p: topP,
-      }),
-      signal,
-    });
+      };
 
-  let response = await makeRequest(targetModel);
+      // Keep thinking overhead low so code tokens start streaming immediately
+      if (providerId === 'google' || providerId === 'openrouter') {
+        payload.reasoning_effort = 'low';
+      }
+
+      return await fetch(`${provider.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          ...(provider.extraHeaders || {}),
+        },
+        body: JSON.stringify(payload),
+        signal: reqSignal,
+      });
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      throw new Error('CONNECT_TIMEOUT');
+    } finally {
+      cleanup();
+    }
+  };
+
+  let response: Response;
+  try {
+    response = await makeRequest(targetModel);
+  } catch (err) {
+    if (signal?.aborted) throw err;
+    // If Gemini 3.8 Flash stalls on initial connection, automatically retry with faster Gemini 3.5 Flash-Lite
+    if (providerId === 'google' && !customModelId?.trim() && targetModel !== 'gemini-3.5-flash-lite') {
+      onToken('', 'Primary model timed out — retrying with Gemini 3.5 Flash-Lite...\n');
+      response = await makeRequest('gemini-3.5-flash-lite');
+    } else {
+      throw new Error(
+        `${provider.name} did not respond within 25 seconds. Please click Stop and try "Gemini 3.5 Flash-Lite (Fast)" or Groq/Cerebras.`
+      );
+    }
+  }
 
   // Automatic fallback to openrouter/free if a specific :free slug is deprecated (404) or rate-limited (429)
   if (
@@ -92,6 +149,18 @@ export async function streamChatCompletion({
     (response.status === 404 || response.status === 429)
   ) {
     response = await makeRequest('openrouter/free');
+  }
+
+  // Automatic fallback on Google AI Studio if a model is overloaded (503) or rate-limited (429)
+  if (
+    !response.ok &&
+    providerId === 'google' &&
+    !customModelId?.trim() &&
+    targetModel !== 'gemini-3.5-flash-lite' &&
+    (response.status === 429 || response.status === 503 || response.status === 504)
+  ) {
+    onToken('', 'Model busy — switching to Gemini 3.5 Flash-Lite...\n');
+    response = await makeRequest('gemini-3.5-flash-lite');
   }
 
   if (!response.ok) {
@@ -133,11 +202,10 @@ export async function streamChatCompletion({
     } catch (err) {
       if (err instanceof Error && err.message === 'STREAM_STALLED') {
         if (fullText.trim()) {
-          // Return partial output instead of hanging forever
           break;
         }
         throw new Error(
-          `${provider.name} stream timed out after 20s with no response. Please try again or switch to Gemini 3.5 Flash-Lite.`
+          `${provider.name} stream stalled for 20s before sending code. Try selecting "Gemini 3.5 Flash-Lite (Fast)" in the dropdown.`
         );
       }
       throw err;
@@ -181,7 +249,7 @@ export async function streamChatCompletion({
 
   if (!fullText.trim()) {
     throw new Error(
-      `${provider.name} returned an empty response. Try switching to "Gemini 3.5 Flash-Lite (Fast)" or "OpenRouter Auto Free Router".`
+      `${provider.name} returned an empty response. Switch the model dropdown to "Gemini 3.5 Flash-Lite (Fast)".`
     );
   }
 
