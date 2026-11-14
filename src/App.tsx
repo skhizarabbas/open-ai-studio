@@ -8,7 +8,7 @@ import {
   RunSettings,
   RunSettingsDrawer,
 } from './components/RunSettingsDrawer';
-import { ChatMessage, streamChatCompletion } from './providers/client';
+import { ChatContentPart, ChatMessage, streamChatCompletion } from './providers/client';
 import { FREE_PROVIDERS } from './providers/models';
 import {
   listProjectFiles,
@@ -113,9 +113,21 @@ export default function App() {
     await writeFile(selectedFile, editorContent);
   };
 
-  const handleSendMessage = async (userPrompt: string) => {
+  const handleSendMessage = async (userPrompt: string, images?: string[]) => {
     setLastError(null);
-    const userMsg: ChatMessage = { role: 'user', content: userPrompt };
+
+    const userContent: string | ChatContentPart[] =
+      images && images.length > 0
+        ? [
+            { type: 'text', text: userPrompt },
+            ...images.map((url) => ({
+              type: 'image_url' as const,
+              image_url: { url },
+            })),
+          ]
+        : userPrompt;
+
+    const userMsg: ChatMessage = { role: 'user', content: userContent };
     const updatedHistory = [...messages, userMsg];
     setMessages([...updatedHistory, { role: 'assistant', content: '' }]);
     setIsGenerating(true);
