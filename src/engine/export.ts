@@ -20,8 +20,8 @@ function crc32(data: Uint8Array): number {
 export async function downloadProjectAsZip(filename = 'open-ai-studio-app.zip'): Promise<void> {
   const filePaths = await listProjectFiles();
   const encoder = new TextEncoder();
-  const fileChunks: Uint8Array[] = [];
-  const centralDirectory: Uint8Array[] = [];
+  const fileChunks: BlobPart[] = [];
+  const centralDirectory: BlobPart[] = [];
   let offset = 0;
 
   for (const path of filePaths) {
@@ -46,7 +46,7 @@ export async function downloadProjectAsZip(filename = 'open-ai-studio-app.zip'):
     lv.setUint16(28, 0, true); // Extra field length
     localHeader.set(nameBytes, 30);
 
-    fileChunks.push(localHeader, data);
+    fileChunks.push(localHeader as BlobPart, data as BlobPart);
 
     // Central Directory Header (46 bytes + filename)
     const centralHeader = new Uint8Array(46 + nameBytes.length);
@@ -70,11 +70,14 @@ export async function downloadProjectAsZip(filename = 'open-ai-studio-app.zip'):
     cv.setUint32(42, offset, true);
     centralHeader.set(nameBytes, 46);
 
-    centralDirectory.push(centralHeader);
+    centralDirectory.push(centralHeader as BlobPart);
     offset += localHeader.length + data.length;
   }
 
-  const centralDirSize = centralDirectory.reduce((sum, arr) => sum + arr.length, 0);
+  const centralDirSize = centralDirectory.reduce(
+    (sum, part) => sum + (part as Uint8Array).length,
+    0
+  );
 
   // End of Central Directory Record (22 bytes)
   const eocd = new Uint8Array(22);
@@ -88,7 +91,9 @@ export async function downloadProjectAsZip(filename = 'open-ai-studio-app.zip'):
   ev.setUint32(16, offset, true);
   ev.setUint16(20, 0, true);
 
-  const blob = new Blob([...fileChunks, ...centralDirectory, eocd], { type: 'application/zip' });
+  const blob = new Blob([...fileChunks, ...centralDirectory, eocd as BlobPart], {
+    type: 'application/zip',
+  });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
