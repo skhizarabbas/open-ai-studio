@@ -1,8 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Code2, Download, Eye, FileCode, RefreshCw, Save } from 'lucide-react';
+import { Code2, Download, Eye, FileCode, RefreshCw, Save, Sliders } from 'lucide-react';
 import { ChatPane } from './components/ChatPane';
 import { TerminalPane } from './components/TerminalPane';
 import { ApiKeyModal } from './components/ApiKeyModal';
+import {
+  DEFAULT_RUN_SETTINGS,
+  RunSettings,
+  RunSettingsDrawer,
+} from './components/RunSettingsDrawer';
 import { ChatMessage, streamChatCompletion } from './providers/client';
 import { FREE_PROVIDERS } from './providers/models';
 import {
@@ -18,11 +23,25 @@ import { downloadProjectAsZip } from './engine/export';
 import { STARTER_TEMPLATE } from './prompts/templates';
 import { buildSystemPrompt } from './prompts/system';
 
+const RUN_SETTINGS_STORAGE_KEY = 'open_ai_studio_run_settings';
+
+function loadStoredRunSettings(): RunSettings {
+  try {
+    const raw = localStorage.getItem(RUN_SETTINGS_STORAGE_KEY);
+    return raw ? { ...DEFAULT_RUN_SETTINGS, ...JSON.parse(raw) } : DEFAULT_RUN_SETTINGS;
+  } catch {
+    return DEFAULT_RUN_SETTINGS;
+  }
+}
+
 export default function App() {
   const [providerId, setProviderId] = useState(FREE_PROVIDERS[0].id);
   const [modelId, setModelId] = useState(FREE_PROVIDERS[0].models[0].id);
   const [customModelId, setCustomModelId] = useState('');
   const [isKeyModalOpen, setIsKeyModalOpen] = useState(false);
+
+  const [runSettings, setRunSettings] = useState<RunSettings>(loadStoredRunSettings);
+  const [isRunSettingsOpen, setIsRunSettingsOpen] = useState(true);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -37,6 +56,15 @@ export default function App() {
   const terminalWriteRef = useRef<((data: string) => void) | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const bootedRef = useRef(false);
+
+  const handleUpdateRunSettings = useCallback((updated: RunSettings) => {
+    setRunSettings(updated);
+    localStorage.setItem(RUN_SETTINGS_STORAGE_KEY, JSON.stringify(updated));
+  }, []);
+
+  const currentProvider = FREE_PROVIDERS.find((p) => p.id === providerId) || FREE_PROVIDERS[0];
+  const currentModel = currentProvider.models.find((m) => m.id === modelId);
+  const maxContextWindow = currentModel?.contextWindow ?? 128000;
 
   const handleTerminalReady = useCallback((writeFn: (data: string) => void) => {
     terminalWriteRef.current = writeFn;
@@ -103,7 +131,7 @@ export default function App() {
 
       const systemMsg: ChatMessage = {
         role: 'system',
-        content: buildSystemPrompt(currentFiles, activeContext),
+        content: buildSystemPrompt(currentFiles, activeContext, runSettings.customInstructions),
       };
 
       const fullResponse = await streamChatCompletion({
@@ -111,6 +139,9 @@ export default function App() {
         modelId,
         customModelId,
         messages: [systemMsg, ...updatedHistory],
+        temperature: runSettings.temperature,
+        maxTokens: runSettings.maxTokens,
+        topP: runSettings.topP,
         signal: controller.signal,
         onToken: (_token, fullText) => {
           setMessages([...updatedHistory, { role: 'assistant', content: fullText }]);
@@ -152,6 +183,8 @@ export default function App() {
     setIsGenerating(false);
   };
 
+  const hasCustomInstructions = runSettings.customInstructions.trim().length > 0;
+
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-zinc-950 text-zinc-100">
       <ApiKeyModal isOpen={isKeyModalOpen} onClose={() => setIsKeyModalOpen(false)} />
@@ -171,7 +204,7 @@ export default function App() {
         onOpenKeys={() => setIsKeyModalOpen(true)}
       />
 
-      {/* Right Workbench */}
+      {/* Center Workbench */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Toolbar */}
         <div className="h-11 border-b border-zinc-800 px-3 flex items-center justify-between bg-zinc-900/40">
@@ -207,7 +240,7 @@ export default function App() {
               </button>
             ) : (
               <div className="flex items-center gap-2 text-xs text-zinc-400">
-                <span>{previewUrl || 'Starting dev server...'}</span>
+                <span className="truncate max-w-[220px]">{previewUrl || 'Starting dev server...'}</span>
                 {previewUrl && (
                   <button
                     onClick={() => setPreviewUrl((u) => `${u.split('?')[0]}?t=${Date.now()}`)}
@@ -227,6 +260,22 @@ export default function App() {
             >
               <Download className="w-3.5 h-3.5 text-indigo-400" />
               Export ZIP
+            </button>
+
+            <button
+              onClick={() => setIsRunSettingsOpen((v) => !v)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border transition-colors ${
+                isRunSettingsOpen
+                  ? 'bg-indigo-600/20 border-indigo-500/40 text-indigo-300'
+                  : 'bg-zinc-800 border-zinc-700 hover:bg-zinc-700 text-zinc-200'
+              }`}
+              title="Toggle Run Settings & System Instructions"
+            >
+              <Sliders className="w-3.5 h-3.5" />
+              Run Settings
+              {hasCustomInstructions && (
+                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400" title="Custom instructions active" />
+              )}
             </button>
           </div>
         </div>
@@ -280,6 +329,15 @@ export default function App() {
         {/* Integrated xterm.js Terminal */}
         <TerminalPane onTerminalReady={handleTerminalReady} />
       </div>
+
+      {/* Right Run Settings Drawer */}
+      <RunSettingsDrawer
+        isOpen={isRunSettingsOpen}
+        onClose={() => setIsRunSettingsOpen(false)}
+        settings={runSettings}
+        onChange={handleUpdateRunSettings}
+        maxContextWindow={maxContextWindow}
+      />
     </div>
   );
 }

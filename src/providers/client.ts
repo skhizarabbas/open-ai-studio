@@ -10,6 +10,9 @@ export interface StreamOptions {
   modelId: string;
   customModelId?: string;
   messages: ChatMessage[];
+  temperature?: number;
+  maxTokens?: number;
+  topP?: number;
   onToken: (token: string, fullText: string) => void;
   signal?: AbortSignal;
 }
@@ -39,6 +42,9 @@ export async function streamChatCompletion({
   modelId,
   customModelId,
   messages,
+  temperature = 0.2,
+  maxTokens = 8192,
+  topP = 0.95,
   onToken,
   signal,
 }: StreamOptions): Promise<string> {
@@ -62,7 +68,9 @@ export async function streamChatCompletion({
       model: targetModel,
       messages,
       stream: true,
-      temperature: 0.2,
+      temperature,
+      max_tokens: maxTokens,
+      top_p: topP,
     }),
     signal,
   });

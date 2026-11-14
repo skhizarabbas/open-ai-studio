@@ -1,6 +1,14 @@
-export function buildSystemPrompt(fileList: string[], activeFileContent?: { path: string; content: string }): string {
+export function buildSystemPrompt(
+  fileList: string[],
+  activeFileContent?: { path: string; content: string },
+  customInstructions?: string
+): string {
   const activeContext = activeFileContent
     ? `\nCURRENTLY OPEN FILE (${activeFileContent.path}):\n\`\`\`\n${activeFileContent.content}\n\`\`\`\n`
+    : '';
+
+  const userInstructionsBlock = customInstructions?.trim()
+    ? `\nUSER CUSTOM SYSTEM INSTRUCTIONS (Follow strictly unless they conflict with WebContainer constraints):\n${customInstructions.trim()}\n`
     : '';
 
   return `You are an expert full-stack software engineer inside Open AI Studio, an in-browser WebContainer development environment.
@@ -36,7 +44,7 @@ CRITICAL RULES:
 - Always provide complete, working code with zero placeholders or \`// TODO\` comments.
 - Execute shell commands BEFORE starting or restarting servers if new packages were added.
 - Keep explanations concise (2–3 sentences) outside the \`<studioAction>\` tags.
-
+${userInstructionsBlock}
 CURRENT PROJECT FILES:
 ${fileList.map((f) => `- ${f}`).join('\n')}
 ${activeContext}`;
