@@ -18,6 +18,20 @@ export interface ProviderConfig {
 
 export const FREE_PROVIDERS: ProviderConfig[] = [
   {
+    id: 'google',
+    name: 'Google AI Studio (Free)',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    requiresKey: true,
+    keyPlaceholder: 'AIzaSy...',
+    signupUrl: 'https://aistudio.google.com/apikey',
+    models: [
+      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Recommended)', contextWindow: 1048576, supportsVision: true },
+      { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash-Lite (Fast)', contextWindow: 1048576, supportsVision: true },
+      { id: 'gemini-3.6-flash', name: 'Gemini 3.6 Flash', contextWindow: 1048576, supportsVision: true },
+      { id: 'gemma-4-31b-it', name: 'Gemma 4 31B (Open Weight)', contextWindow: 131072, supportsVision: true },
+    ],
+  },
+  {
     id: 'openrouter',
     name: 'OpenRouter (Free Tier)',
     baseUrl: 'https://openrouter.ai/api/v1',
@@ -33,18 +47,6 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
       { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B Vision (Free)', contextWindow: 131072, supportsVision: true },
       { id: 'nvidia/nemotron-3-ultra:free', name: 'Nemotron 3 Ultra (Free)', contextWindow: 131072 },
       { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B (Free)', contextWindow: 131072 },
-    ],
-  },
-  {
-    id: 'google',
-    name: 'Google AI Studio (Free)',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    requiresKey: true,
-    keyPlaceholder: 'AIzaSy...',
-    signupUrl: 'https://aistudio.google.com/apikey',
-    models: [
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Free)', contextWindow: 1048576, supportsVision: true },
-      { id: 'gemma-4-31b-it', name: 'Gemma 4 31B (Free)', contextWindow: 131072, supportsVision: true },
     ],
   },
   {
