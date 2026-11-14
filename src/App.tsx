@@ -200,13 +200,19 @@ export default function App() {
 
     try {
       const currentFiles = await listProjectFiles();
+      const appEntryContent = await readFile('src/App.tsx').catch(() => '');
       const activeContext = selectedFile
         ? { path: selectedFile, content: await readFile(selectedFile).catch(() => '') }
         : undefined;
 
       const systemMsg: ChatMessage = {
         role: 'system',
-        content: buildSystemPrompt(currentFiles, activeContext, runSettings.customInstructions),
+        content: buildSystemPrompt(
+          currentFiles,
+          activeContext,
+          runSettings.customInstructions,
+          appEntryContent
+        ),
       };
 
       const fullResponse = await streamChatCompletion({
