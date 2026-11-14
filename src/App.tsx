@@ -1,10 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Code, Code2, Download, Eye, FileCode, Layers, RefreshCw, Save, Sliders } from 'lucide-react';
+import {
+  Code,
+  Code2,
+  Download,
+  Eye,
+  FileCode,
+  Layers,
+  LayoutGrid,
+  RefreshCw,
+  Save,
+  Sliders,
+} from 'lucide-react';
 import { ChatPane, ProjectSnapshot } from './components/ChatPane';
 import { TerminalPane } from './components/TerminalPane';
 import { ApiKeyModal } from './components/ApiKeyModal';
 import { StarterGalleryModal } from './components/StarterGalleryModal';
 import { ExportCodeModal } from './components/ExportCodeModal';
+import { ResizeHandle } from './components/ResizeHandle';
 import {
   DEFAULT_RUN_SETTINGS,
   RunSettings,
@@ -29,6 +41,21 @@ import { STARTER_GALLERY, STARTER_TEMPLATE, StarterAppTemplate } from './prompts
 import { buildSystemPrompt } from './prompts/system';
 
 const RUN_SETTINGS_STORAGE_KEY = 'open_ai_studio_run_settings';
+const LAYOUT_STORAGE_KEY = 'open_ai_studio_layout_sizes';
+
+interface LayoutSizes {
+  chatWidth: number;
+  settingsWidth: number;
+  terminalHeight: number;
+  fileTreeWidth: number;
+}
+
+const DEFAULT_LAYOUT: LayoutSizes = {
+  chatWidth: 384,
+  settingsWidth: 320,
+  terminalHeight: 176,
+  fileTreeWidth: 224,
+};
 
 function loadStoredRunSettings(): RunSettings {
   try {
@@ -37,6 +64,19 @@ function loadStoredRunSettings(): RunSettings {
   } catch {
     return DEFAULT_RUN_SETTINGS;
   }
+}
+
+function loadStoredLayout(): LayoutSizes {
+  try {
+    const raw = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    return raw ? { ...DEFAULT_LAYOUT, ...JSON.parse(raw) } : DEFAULT_LAYOUT;
+  } catch {
+    return DEFAULT_LAYOUT;
+  }
+}
+
+function clamp(val: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, val));
 }
 
 export default function App() {
@@ -50,6 +90,9 @@ export default function App() {
 
   const [runSettings, setRunSettings] = useState<RunSettings>(loadStoredRunSettings);
   const [isRunSettingsOpen, setIsRunSettingsOpen] = useState(true);
+
+  const [layout, setLayout] = useState<LayoutSizes>(loadStoredLayout);
+  const [isResizingPanels, setIsResizingPanels] = useState(false);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [snapshotsByMessageIndex, setSnapshotsByMessageIndex] = useState<Record<number, ProjectSnapshot>>({});
@@ -68,6 +111,19 @@ export default function App() {
   const terminalWriteRef = useRef<((data: string) => void) | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const bootedRef = useRef(false);
+
+  const updateLayout = useCallback((updater: (prev: LayoutSizes) => LayoutSizes) => {
+    setLayout((prev) => {
+      const next = updater(prev);
+      localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
+  const handleResetLayout = () => {
+    setLayout(DEFAULT_LAYOUT);
+    localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(DEFAULT_LAYOUT));
+  };
 
   const handleUpdateRunSettings = useCallback((updated: RunSettings) => {
     setRunSettings(updated);
@@ -295,28 +351,39 @@ export default function App() {
         messages={messages}
       />
 
-      <ChatPane
-        providerId={providerId}
-        setProviderId={setProviderId}
-        modelId={modelId}
-        setModelId={setModelId}
-        customModelId={customModelId}
-        setCustomModelId={setCustomModelId}
-        messages={messages}
-        snapshotsByMessageIndex={snapshotsByMessageIndex}
-        activeSnapshotId={activeSnapshotId}
-        onRestoreSnapshot={handleRestoreSnapshot}
-        isGenerating={isGenerating}
-        lastError={lastError}
-        onSendMessage={handleSendMessage}
-        onStopGeneration={handleStopGeneration}
-        onOpenKeys={() => setIsKeyModalOpen(true)}
+      {/* Resizable Left Chat Pane */}
+      <div style={{ width: layout.chatWidth }} className="shrink-0 h-full overflow-hidden">
+        <ChatPane
+          providerId={providerId}
+          setProviderId={setProviderId}
+          modelId={modelId}
+          setModelId={setModelId}
+          customModelId={customModelId}
+          setCustomModelId={setCustomModelId}
+          messages={messages}
+          snapshotsByMessageIndex={snapshotsByMessageIndex}
+          activeSnapshotId={activeSnapshotId}
+          onRestoreSnapshot={handleRestoreSnapshot}
+          isGenerating={isGenerating}
+          lastError={lastError}
+          onSendMessage={handleSendMessage}
+          onStopGeneration={handleStopGeneration}
+          onOpenKeys={() => setIsKeyModalOpen(true)}
+        />
+      </div>
+
+      <ResizeHandle
+        direction="vertical"
+        onDragStateChange={setIsResizingPanels}
+        onResize={(delta) =>
+          updateLayout((prev) => ({ ...prev, chatWidth: clamp(prev.chatWidth + delta, 280, 620) }))
+        }
       />
 
       {/* Center Workbench */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top Toolbar */}
-        <div className="h-11 border-b border-zinc-800 px-3 flex items-center justify-between bg-zinc-900/40">
+        <div className="h-11 border-b border-zinc-800 px-3 flex items-center justify-between bg-zinc-900/40 shrink-0">
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-lg border border-zinc-800">
               <button
@@ -392,6 +459,14 @@ export default function App() {
             </button>
 
             <button
+              onClick={handleResetLayout}
+              className="p-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+              title="Reset Panel Sizes"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </button>
+
+            <button
               onClick={() => setIsRunSettingsOpen((v) => !v)}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs border transition-colors ${
                 isRunSettingsOpen
@@ -413,8 +488,11 @@ export default function App() {
         <div className="flex-1 flex min-h-0">
           {activeTab === 'code' ? (
             <>
-              {/* File Tree */}
-              <div className="w-56 border-r border-zinc-800 bg-zinc-950 p-2 overflow-y-auto space-y-0.5">
+              {/* Resizable File Tree */}
+              <div
+                style={{ width: layout.fileTreeWidth }}
+                className="shrink-0 bg-zinc-950 p-2 overflow-y-auto space-y-0.5"
+              >
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 px-2 py-1">
                   Project Files
                 </div>
@@ -434,18 +512,33 @@ export default function App() {
                 ))}
               </div>
 
+              <ResizeHandle
+                direction="vertical"
+                onDragStateChange={setIsResizingPanels}
+                onResize={(delta) =>
+                  updateLayout((prev) => ({
+                    ...prev,
+                    fileTreeWidth: clamp(prev.fileTreeWidth + delta, 140, 400),
+                  }))
+                }
+              />
+
               {/* Code Editor */}
               <textarea
                 value={editorContent}
                 onChange={(e) => setEditorContent(e.target.value)}
                 spellCheck={false}
-                className="flex-1 bg-zinc-950 text-zinc-100 font-mono text-xs p-4 focus:outline-none resize-none leading-relaxed"
+                className="flex-1 min-w-0 bg-zinc-950 text-zinc-100 font-mono text-xs p-4 focus:outline-none resize-none leading-relaxed"
               />
             </>
           ) : (
-            <div className="flex-1 bg-white">
+            <div className="flex-1 bg-white relative">
               {previewUrl ? (
-                <iframe src={previewUrl} title="App Preview" className="w-full h-full border-0" />
+                <iframe
+                  src={previewUrl}
+                  title="App Preview"
+                  className={`w-full h-full border-0 ${isResizingPanels ? 'pointer-events-none' : ''}`}
+                />
               ) : (
                 <div className="w-full h-full bg-zinc-950 flex items-center justify-center text-xs text-zinc-500">
                   Installing dependencies and booting Vite server inside WebContainer...
@@ -455,18 +548,50 @@ export default function App() {
           )}
         </div>
 
-        {/* Integrated xterm.js Terminal */}
-        <TerminalPane onTerminalReady={handleTerminalReady} />
+        <ResizeHandle
+          direction="horizontal"
+          onDragStateChange={setIsResizingPanels}
+          onResize={(delta) =>
+            updateLayout((prev) => ({
+              ...prev,
+              terminalHeight: clamp(prev.terminalHeight - delta, 80, 480),
+            }))
+          }
+        />
+
+        {/* Resizable Integrated xterm.js Terminal */}
+        <div
+          style={{ height: layout.terminalHeight }}
+          className="shrink-0 overflow-hidden [&>div]:!h-full"
+        >
+          <TerminalPane onTerminalReady={handleTerminalReady} />
+        </div>
       </div>
 
-      {/* Right Run Settings Drawer */}
-      <RunSettingsDrawer
-        isOpen={isRunSettingsOpen}
-        onClose={() => setIsRunSettingsOpen(false)}
-        settings={runSettings}
-        onChange={handleUpdateRunSettings}
-        maxContextWindow={maxContextWindow}
-      />
+      {/* Resizable Right Run Settings Drawer */}
+      {isRunSettingsOpen && (
+        <>
+          <ResizeHandle
+            direction="vertical"
+            onDragStateChange={setIsResizingPanels}
+            onResize={(delta) =>
+              updateLayout((prev) => ({
+                ...prev,
+                settingsWidth: clamp(prev.settingsWidth - delta, 240, 500),
+              }))
+            }
+          />
+          <div style={{ width: layout.settingsWidth }} className="shrink-0 h-full overflow-hidden">
+            <RunSettingsDrawer
+              isOpen={isRunSettingsOpen}
+              onClose={() => setIsRunSettingsOpen(false)}
+              settings={runSettings}
+              onChange={handleUpdateRunSettings}
+              maxContextWindow={maxContextWindow}
+            />
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -1,16 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  Send,
-  Square,
-  Key,
-  Wrench,
-  AlertTriangle,
-  ImagePlus,
-  X,
-  History,
-  Check,
-  ArrowDown,
-} from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Send, Square, Key, Wrench, AlertTriangle, ImagePlus, X, History, Check } from 'lucide-react';
 import { FREE_PROVIDERS } from '../providers/models';
 import { ChatMessage } from '../providers/client';
 
@@ -95,32 +84,9 @@ export function ChatPane({
   const [input, setInput] = useState('');
   const [attachedImages, setAttachedImages] = useState<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [userScrolledUp, setUserScrolledUp] = useState(false);
-
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const bottomAnchorRef = useRef<HTMLDivElement | null>(null);
 
   const currentProvider = FREE_PROVIDERS.find((p) => p.id === providerId) || FREE_PROVIDERS[0];
-
-  const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
-    bottomAnchorRef.current?.scrollIntoView({ behavior, block: 'end' });
-  };
-
-  // Detect if user manually scrolled up to read earlier messages
-  const handleScroll = () => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setUserScrolledUp(distanceFromBottom > 80);
-  };
-
-  // Auto-scroll live as tokens stream in
-  useEffect(() => {
-    if (!userScrolledUp) {
-      scrollToBottom('auto');
-    }
-  }, [messages, isGenerating, userScrolledUp]);
 
   const handleProviderChange = (newId: string) => {
     setProviderId(newId);
@@ -169,34 +135,14 @@ export function ChatPane({
 
     const promptText =
       input.trim() || 'Build a clean, responsive React + Tailwind app matching the attached UI screenshot.';
-    setUserScrolledUp(false);
     onSendMessage(promptText, attachedImages.length > 0 ? attachedImages : undefined);
     setInput('');
     setAttachedImages([]);
-    requestAnimationFrame(() => scrollToBottom('smooth'));
   };
 
-  const renderMessageContent = (content: ChatMessage['content'], isStreamingMessage: boolean) => {
+  const renderMessageContent = (content: ChatMessage['content']) => {
     if (typeof content === 'string') {
-      if (!content && isStreamingMessage) {
-        return (
-          <span className="inline-flex items-center gap-1.5 text-indigo-300">
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
-            Thinking &amp; generating code...
-          </span>
-        );
-      }
-      return (
-        <>
-          <span>{content}</span>
-          {isStreamingMessage && (
-            <span
-              aria-hidden="true"
-              className="inline-block w-1.5 h-3.5 ml-0.5 align-middle bg-indigo-400 animate-pulse"
-            />
-          )}
-        </>
-      );
+      return <span>{content}</span>;
     }
 
     return (
@@ -223,19 +169,11 @@ export function ChatPane({
   };
 
   return (
-    <div className="w-full flex flex-col bg-zinc-900/50 h-full relative">
+    <div className="w-full flex flex-col bg-zinc-900/50 h-full">
       {/* Header & Model Controls */}
-      <div className="p-3 border-b border-zinc-800 space-y-2 shrink-0">
+      <div className="p-3 border-b border-zinc-800 space-y-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm text-zinc-100">Open AI Studio</span>
-            {isGenerating && (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-[10px] font-medium text-indigo-300">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
-                Streaming
-              </span>
-            )}
-          </div>
+          <span className="font-semibold text-sm text-zinc-100">Open AI Studio</span>
           <button
             onClick={onOpenKeys}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-zinc-800 hover:bg-zinc-700 text-xs text-zinc-200"
@@ -280,12 +218,8 @@ export function ChatPane({
         />
       </div>
 
-      {/* Chat Messages with Auto-Scroll */}
-      <div
-        ref={scrollContainerRef}
-        onScroll={handleScroll}
-        className="flex-1 overflow-y-auto p-3 space-y-3 scroll-smooth"
-      >
+      {/* Chat Messages */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3">
         {messages.length === 0 && (
           <div className="text-xs text-zinc-500 space-y-2 p-2">
             <p className="font-medium text-zinc-400">Starter Ideas (or paste a UI screenshot):</p>
@@ -313,21 +247,17 @@ export function ChatPane({
         {messages.map((msg, idx) => {
           const snapshot = snapshotsByMessageIndex[idx];
           const isCurrentVersion = snapshot && snapshot.id === activeSnapshotId;
-          const isStreamingMessage =
-            isGenerating && msg.role === 'assistant' && idx === messages.length - 1;
 
           return (
             <div
               key={idx}
-              className={`p-3 rounded-lg text-xs leading-relaxed whitespace-pre-wrap break-words ${
+              className={`p-3 rounded-lg text-xs leading-relaxed whitespace-pre-wrap ${
                 msg.role === 'user'
                   ? 'bg-indigo-600/20 border border-indigo-500/30 text-zinc-100 ml-4'
-                  : isStreamingMessage
-                  ? 'bg-zinc-950 border border-indigo-500/40 text-zinc-200 mr-2 shadow-sm shadow-indigo-950/30'
                   : 'bg-zinc-950 border border-zinc-800 text-zinc-300 mr-2'
               }`}
             >
-              {renderMessageContent(msg.content, isStreamingMessage)}
+              {renderMessageContent(msg.content)}
 
               {snapshot && (
                 <div className="mt-2.5 pt-2 border-t border-zinc-800/90 flex items-center justify-between gap-2">
@@ -362,37 +292,17 @@ export function ChatPane({
             </div>
           );
         })}
-
-        <div ref={bottomAnchorRef} className="h-px" />
       </div>
-
-      {/* Jump to Live Stream Button when Scrolled Up */}
-      {userScrolledUp && (
-        <button
-          type="button"
-          onClick={() => {
-            setUserScrolledUp(false);
-            scrollToBottom('smooth');
-          }}
-          className="self-center mb-2 px-3 py-1 rounded-full bg-indigo-600 hover:bg-indigo-500 text-[11px] font-medium text-white shadow-lg flex items-center gap-1.5 transition-all"
-        >
-          <ArrowDown className="w-3 h-3" />
-          {isGenerating ? 'Follow live stream' : 'Scroll to bottom'}
-        </button>
-      )}
 
       {/* Error Self-Healing Banner */}
       {lastError && !isGenerating && (
-        <div className="mx-3 mb-2 p-2.5 rounded-lg bg-red-950/60 border border-red-800/70 space-y-2 shrink-0">
+        <div className="mx-3 mb-2 p-2.5 rounded-lg bg-red-950/60 border border-red-800/70 space-y-2">
           <div className="flex items-start gap-2 text-xs text-red-200">
             <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
             <span className="line-clamp-3">{lastError}</span>
           </div>
           <button
-            onClick={() => {
-              setUserScrolledUp(false);
-              onSendMessage(`Fix this error in the project:\n${lastError}`);
-            }}
+            onClick={() => onSendMessage(`Fix this error in the project:\n${lastError}`)}
             className="w-full py-1.5 rounded bg-red-600 hover:bg-red-500 text-xs font-medium text-white flex items-center justify-center gap-1.5"
           >
             <Wrench className="w-3.5 h-3.5" />
@@ -410,7 +320,7 @@ export function ChatPane({
         }}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
-        className={`p-3 border-t border-zinc-800 transition-colors shrink-0 ${
+        className={`p-3 border-t border-zinc-800 transition-colors ${
           isDragging ? 'bg-indigo-950/30 border-indigo-500' : ''
         }`}
       >

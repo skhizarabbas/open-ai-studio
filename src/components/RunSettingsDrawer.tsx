@@ -54,7 +54,7 @@ export const RunSettingsDrawer: React.FC<RunSettingsDrawerProps> = ({
   };
 
   return (
-    <aside className="w-80 border-l border-zinc-800 bg-zinc-900/60 flex flex-col h-full shrink-0">
+    <aside className="w-full bg-zinc-900/60 flex flex-col h-full">
       {/* Header */}
       <div className="h-11 border-b border-zinc-800 px-3 flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
