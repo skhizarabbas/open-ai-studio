@@ -56,7 +56,7 @@ export async function streamChatCompletion({
   const apiKey = getStoredApiKeys()[providerId] || 'ollama';
 
   if (provider.requiresKey && (!apiKey || apiKey === 'ollama')) {
-    throw new Error(`Missing API key for ${provider.name}. Please add your free key in Settings.`);
+    throw new Error(`Missing API key for ${provider.name}. Please add your free key in API Keys.`);
   }
 
   const targetModel = customModelId?.trim() ? customModelId.trim() : modelId;
@@ -105,6 +105,7 @@ export async function streamChatCompletion({
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let fullText = '';
+  let reasoningChars = 0;
   let buffer = '';
 
   while (true) {
@@ -122,15 +123,33 @@ export async function streamChatCompletion({
 
       try {
         const json = JSON.parse(trimmed.slice(6));
-        const delta = json.choices?.[0]?.delta?.content;
+        if (json.error?.message) {
+          throw new Error(`${provider.name} Stream Error: ${json.error.message}`);
+        }
+        const choice = json.choices?.[0];
+        const delta = choice?.delta?.content;
+        const reasoning = choice?.delta?.reasoning || choice?.delta?.reasoning_content;
+
         if (delta) {
           fullText += delta;
           onToken(delta, fullText);
+        } else if (reasoning && !fullText) {
+          reasoningChars += String(reasoning).length;
+          onToken('', `Thinking... (${reasoningChars} chars)`);
         }
-      } catch {
+      } catch (err) {
+        if (err instanceof Error && err.message.includes('Stream Error:')) {
+          throw err;
+        }
         // Ignore partial JSON chunks until next line arrives
       }
     }
+  }
+
+  if (!fullText.trim()) {
+    throw new Error(
+      `${provider.name} returned an empty response. Try switching the model dropdown to "OpenRouter Auto Free Router" or "Google AI Studio (Free) -> Gemini 2.5 Flash".`
+    );
   }
 
   return fullText;

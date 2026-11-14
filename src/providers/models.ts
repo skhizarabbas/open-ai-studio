@@ -29,11 +29,10 @@ export const FREE_PROVIDERS: ProviderConfig[] = [
       'X-Title': 'Open AI Studio',
     },
     models: [
-      { id: 'deepseek/deepseek-chat-v3-0324:free', name: 'DeepSeek V3 0324 (Free)', contextWindow: 131072 },
-      { id: 'qwen/qwen3-coder-next:free', name: 'Qwen3 Coder Next (Free)', contextWindow: 262144 },
-      { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B Vision (Free)', contextWindow: 131072, supportsVision: true },
-      { id: 'mistralai/devstral-small-2505:free', name: 'Devstral Small (Free)', contextWindow: 128000 },
       { id: 'openrouter/free', name: 'OpenRouter Auto Free Router', contextWindow: 128000, supportsVision: true },
+      { id: 'google/gemma-4-31b-it:free', name: 'Gemma 4 31B Vision (Free)', contextWindow: 131072, supportsVision: true },
+      { id: 'nvidia/nemotron-3-ultra:free', name: 'Nemotron 3 Ultra (Free)', contextWindow: 131072 },
+      { id: 'meta-llama/llama-3.3-70b-instruct:free', name: 'Llama 3.3 70B (Free)', contextWindow: 131072 },
     ],
   },
   {
