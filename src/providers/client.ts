@@ -202,6 +202,31 @@ export async function streamChatCompletion({
     }
   };
 
+  const processSseLine = (line: string) => {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed === 'data: [DONE]' || !trimmed.startsWith('data: ')) return;
+
+    try {
+      const json = JSON.parse(trimmed.slice(6));
+      if (json.error?.message) {
+        throw new Error(`${provider.name} Stream Error: ${json.error.message}`);
+      }
+      const choice = json.choices?.[0];
+      const content = choice?.delta?.content ?? choice?.message?.content;
+      const reasoning = choice?.delta?.reasoning || choice?.delta?.reasoning_content;
+
+      if (typeof content === 'string' && content) {
+        fullText += content;
+        onToken(content, fullText);
+      } else if (reasoning && !fullText) {
+        reasoningChars += String(reasoning).length;
+        onToken('', `Thinking... (${reasoningChars} chars)`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('Stream Error:')) throw err;
+    }
+  };
+
   while (true) {
     let chunkResult: ReadableStreamReadResult<Uint8Array>;
     try {
@@ -225,39 +250,21 @@ export async function streamChatCompletion({
     const lines = buffer.split('\n');
     buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed === 'data: [DONE]') continue;
-      if (!trimmed.startsWith('data: ')) continue;
+    for (const line of lines) processSseLine(line);
+  }
 
-      try {
-        const json = JSON.parse(trimmed.slice(6));
-        if (json.error?.message) {
-          throw new Error(`${provider.name} Stream Error: ${json.error.message}`);
-        }
-        const choice = json.choices?.[0];
-        const delta = choice?.delta?.content;
-        const reasoning = choice?.delta?.reasoning || choice?.delta?.reasoning_content;
-
-        if (delta) {
-          fullText += delta;
-          onToken(delta, fullText);
-        } else if (reasoning && !fullText) {
-          reasoningChars += String(reasoning).length;
-          onToken('', `Thinking... (${reasoningChars} chars)`);
-        }
-      } catch (err) {
-        if (err instanceof Error && err.message.includes('Stream Error:')) {
-          throw err;
-        }
-      }
-    }
+  buffer += decoder.decode();
+  if (buffer.trim()) {
+    for (const line of buffer.split('\n')) processSseLine(line);
   }
 
   if (!fullText.trim()) {
-    throw new Error(
-      `${provider.name} returned an empty response. Switch the model dropdown to "Gemini 3.5 Flash-Lite (Fast)".`
-    );
+    if (providerId === 'pollinations') {
+      throw new Error(
+        'The anonymous GPT-OSS service completed without a text answer. Retry once, or switch to a provider with your own API key or a local model.'
+      );
+    }
+    throw new Error(`${provider.name} completed without returning a text answer. Try another model or provider.`);
   }
 
   return fullText;
