@@ -81,9 +81,9 @@ export async function streamChatCompletion({
   signal,
 }: StreamOptions): Promise<string> {
   const provider = getProviderById(providerId);
-  const apiKey = getStoredApiKeys()[providerId] || 'ollama';
+  const apiKey = getStoredApiKeys()[providerId] || '';
 
-  if (provider.requiresKey && (!apiKey || apiKey === 'ollama')) {
+  if (provider.requiresKey && !apiKey) {
     throw new Error(`Missing API key for ${provider.name}. Please add your free key in API Keys.`);
   }
 
@@ -106,11 +106,11 @@ export async function streamChatCompletion({
         payload.reasoning_effort = 'low';
       }
 
-      return await fetch(`${provider.baseUrl}/chat/completions`, {
+      return await fetch(provider.chatCompletionsUrl || `${provider.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
+          ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
           ...(provider.extraHeaders || {}),
         },
         body: JSON.stringify(payload),
@@ -161,6 +161,13 @@ export async function streamChatCompletion({
   ) {
     onToken('', 'Model busy — switching to Gemini 3.5 Flash-Lite...\n');
     response = await makeRequest('gemini-3.5-flash-lite');
+  }
+
+  if (providerId === 'pollinations' && response.status === 402) {
+    const retryAfter = response.headers.get('Retry-After');
+    throw new Error(
+      `The anonymous GPT-OSS service is at its shared per-IP limit.${retryAfter ? ` Try again in about ${retryAfter} seconds.` : ' Wait a little and try again.'} You can also switch to a provider with your own API key.`
+    );
   }
 
   if (!response.ok) {

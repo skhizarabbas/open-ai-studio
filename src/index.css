@@ -1,3 +1,47 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+.studio-start-grid {
+	background-image:
+		linear-gradient(rgba(207, 220, 196, 0.045) 1px, transparent 1px),
+		linear-gradient(90deg, rgba(207, 220, 196, 0.045) 1px, transparent 1px);
+	background-size: 34px 34px;
+	mask-image: radial-gradient(ellipse at center, #000 18%, transparent 94%);
+}
+
+.studio-start-grid::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(112deg, rgba(163, 230, 53, 0.055), transparent 34%, transparent 70%, rgba(34, 211, 238, 0.035));
+}
+
+.studio-start-enter {
+	animation: studio-start-enter 420ms ease-out both;
+}
+
+.studio-toolbar-scroll {
+	scrollbar-width: none;
+}
+
+.studio-toolbar-scroll::-webkit-scrollbar {
+	display: none;
+}
+
+@keyframes studio-start-enter {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.studio-start-enter {
+		animation: none;
+	}
+}

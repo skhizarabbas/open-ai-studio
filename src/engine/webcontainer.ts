@@ -1,7 +1,19 @@
-import { FileSystemTree, WebContainer } from '@webcontainer/api';
+import { FileSystemTree, WebContainer, WebContainerProcess } from '@webcontainer/api';
+
+export type ProjectFileContent = string | Uint8Array;
 
 let webcontainerInstance: WebContainer | null = null;
 let bootPromise: Promise<WebContainer> | null = null;
+let projectServerProcess: WebContainerProcess | null = null;
+
+function normalizeProjectPath(filePath: string): string {
+  const cleanPath = filePath.replace(/\\/g, '/').replace(/^\/+/, '');
+  const parts = cleanPath.split('/');
+  if (!cleanPath || cleanPath.includes('\0') || parts.some((part) => !part || part === '.' || part === '..' || part.includes(':'))) {
+    throw new Error('Invalid project file path.');
+  }
+  return parts.join('/');
+}
 
 export async function getWebContainer(): Promise<WebContainer> {
   if (webcontainerInstance) return webcontainerInstance;
@@ -29,9 +41,9 @@ export async function resetProjectFiles(): Promise<void> {
   }
 }
 
-export async function writeFile(filePath: string, content: string): Promise<void> {
+export async function writeFile(filePath: string, content: ProjectFileContent): Promise<void> {
   const wc = await getWebContainer();
-  const cleanPath = filePath.replace(/^\/+/, '');
+  const cleanPath = normalizeProjectPath(filePath);
   const parts = cleanPath.split('/');
   if (parts.length > 1) {
     const dir = parts.slice(0, -1).join('/');
@@ -42,7 +54,7 @@ export async function writeFile(filePath: string, content: string): Promise<void
 
 export async function readFile(filePath: string): Promise<string> {
   const wc = await getWebContainer();
-  const cleanPath = filePath.replace(/^\/+/, '');
+  const cleanPath = normalizeProjectPath(filePath);
   return await wc.fs.readFile(cleanPath, 'utf-8');
 }
 
@@ -65,20 +77,54 @@ export async function listProjectFiles(dir = ''): Promise<string[]> {
   return results.sort();
 }
 
-export async function captureProjectSnapshot(): Promise<Record<string, string>> {
+export async function captureProjectSnapshot(): Promise<Record<string, ProjectFileContent>> {
   const paths = await listProjectFiles();
-  const snapshot: Record<string, string> = {};
+  const snapshot: Record<string, ProjectFileContent> = {};
   for (const p of paths) {
-    snapshot[p] = await readFile(p);
+    const bytes = await (await getWebContainer()).fs.readFile(p);
+    try {
+      const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      snapshot[p] = text.includes('\0') ? bytes : text;
+    } catch {
+      snapshot[p] = bytes;
+    }
   }
   return snapshot;
 }
 
-export async function restoreProjectSnapshot(snapshot: Record<string, string>): Promise<void> {
+export async function restoreProjectSnapshot(snapshot: Record<string, ProjectFileContent>): Promise<void> {
   await resetProjectFiles();
   for (const [filePath, content] of Object.entries(snapshot)) {
     await writeFile(filePath, content);
   }
+}
+
+export async function startProjectServer(
+  command: string,
+  onOutput?: (data: string) => void
+): Promise<void> {
+  await stopProjectServer();
+  const wc = await getWebContainer();
+  const process = await wc.spawn('jsh', ['-c', command]);
+  projectServerProcess = process;
+  process.output.pipeTo(
+    new WritableStream({
+      write(data) {
+        onOutput?.(data);
+      },
+    })
+  ).catch(() => undefined);
+  void process.exit.then(() => {
+    if (projectServerProcess === process) projectServerProcess = null;
+  });
+}
+
+export async function stopProjectServer(): Promise<void> {
+  const process = projectServerProcess;
+  projectServerProcess = null;
+  if (!process) return;
+  process.kill();
+  await process.exit.catch(() => undefined);
 }
 
 export async function runShellCommand(

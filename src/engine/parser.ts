@@ -48,7 +48,8 @@ export function parseStudioActions(llmOutput: string): ParsedAction[] {
 export async function executeStudioActions(
   actions: ParsedAction[],
   onTerminalOutput?: (data: string) => void,
-  onFileChanged?: (filePath: string) => void
+  onFileChanged?: (filePath: string) => void,
+  onShellApproval?: (command: string) => boolean | Promise<boolean>
 ): Promise<ExecutionLog[]> {
   const logs: ExecutionLog[] = [];
 
@@ -73,6 +74,10 @@ export async function executeStudioActions(
           message: `Patched ${action.filePath}`,
         });
       } else if (action.type === 'shell') {
+        const approved = await onShellApproval?.(action.content);
+        if (!approved) {
+          throw new Error('Shell command was not approved.');
+        }
         onTerminalOutput?.(`\r\n$ ${action.content}\r\n`);
         const { exitCode, output } = await runShellCommand(action.content, onTerminalOutput);
         if (exitCode !== 0) {

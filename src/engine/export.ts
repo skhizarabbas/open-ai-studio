@@ -1,4 +1,4 @@
-import { listProjectFiles, readFile } from './webcontainer';
+import { captureProjectSnapshot } from './webcontainer';
 
 // Minimal CRC32 table for valid ZIP archives
 const crcTable = new Uint32Array(256).map((_, n) => {
@@ -18,15 +18,19 @@ function crc32(data: Uint8Array): number {
 }
 
 export async function downloadProjectAsZip(filename = 'open-ai-studio-app.zip'): Promise<void> {
-  const filePaths = await listProjectFiles();
+  const files = await captureProjectSnapshot();
+  const filePaths = Object.keys(files).filter((path) => {
+    const name = path.split('/').pop()?.toLowerCase() || '';
+    return !(/^\.env(?:\.|$)/.test(name) && name !== '.env.example');
+  });
   const encoder = new TextEncoder();
   const fileChunks: BlobPart[] = [];
   const centralDirectory: BlobPart[] = [];
   let offset = 0;
 
   for (const path of filePaths) {
-    const content = await readFile(path);
-    const data = encoder.encode(content);
+    const content = files[path];
+    const data = typeof content === 'string' ? encoder.encode(content) : content;
     const nameBytes = encoder.encode(path);
     const checksum = crc32(data);
 

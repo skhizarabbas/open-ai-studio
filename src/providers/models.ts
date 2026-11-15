@@ -9,6 +9,7 @@ export interface ProviderConfig {
   id: string;
   name: string;
   baseUrl: string;
+  chatCompletionsUrl?: string;
   requiresKey: boolean;
   keyPlaceholder: string;
   signupUrl: string;
@@ -18,6 +19,19 @@ export interface ProviderConfig {
 }
 
 export const FREE_PROVIDERS: ProviderConfig[] = [
+  {
+    id: 'pollinations',
+    name: 'GPT-OSS 20B Cloud (Free, No Key)',
+    baseUrl: 'https://text.pollinations.ai/v1',
+    chatCompletionsUrl: 'https://text.pollinations.ai/v1/chat/completions',
+    requiresKey: false,
+    keyPlaceholder: 'No key required',
+    signupUrl: 'https://pollinations.ai/',
+    freeTierNote: 'Anonymous GPT-OSS 20B access. Best-effort service with a shared per-IP limit of about one text request every 30 seconds.',
+    models: [
+      { id: 'openai-fast', name: 'GPT-OSS 20B (Free Cloud)', contextWindow: 32768 },
+    ],
+  },
   {
     id: 'google',
     name: 'Google AI Studio (Free)',

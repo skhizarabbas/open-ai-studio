@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Key, X, Check } from 'lucide-react';
+import { Key, X, Check, ExternalLink } from 'lucide-react';
 import { FREE_PROVIDERS } from '../providers/models';
 import { getStoredApiKeys, saveApiKey } from '../providers/client';
 
@@ -26,7 +26,7 @@ export function ApiKeyModal({ isOpen, onClose }: ApiKeyModalProps) {
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
           <div className="flex items-center gap-2">
             <Key className="w-5 h-5 text-indigo-400" />
-            <h2 className="font-semibold text-zinc-100">Free Cloud API Keys (Stored Locally)</h2>
+            <h2 className="font-semibold text-zinc-100">Cloud &amp; Local Model Access</h2>
           </div>
           <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100">
             <X className="w-5 h-5" />
@@ -35,7 +35,7 @@ export function ApiKeyModal({ isOpen, onClose }: ApiKeyModalProps) {
 
         <div className="p-5 overflow-y-auto space-y-4">
           <p className="text-xs text-zinc-400">
-            Keys are saved strictly in your browser&apos;s <code>localStorage</code> and sent directly to each provider&apos;s API.
+            Start with GPT-OSS 20B without a key. Anonymous access is shared and rate-limited; adding a provider key gives you more model choices. Keys stay in this browser and are sent directly to the selected provider.
           </p>
 
           {FREE_PROVIDERS.filter((p) => p.requiresKey).map((provider) => (
@@ -61,6 +61,29 @@ export function ApiKeyModal({ isOpen, onClose }: ApiKeyModalProps) {
               </div>
             </div>
           ))}
+
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950 p-3.5 space-y-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+              Available without a key
+            </div>
+            {FREE_PROVIDERS.filter((provider) => !provider.requiresKey).map((provider) => (
+              <div key={provider.id} className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-zinc-200">{provider.name}</div>
+                  <p className="mt-1 text-[11px] leading-relaxed text-zinc-500">{provider.freeTierNote}</p>
+                </div>
+                <a
+                  href={provider.signupUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex shrink-0 items-center gap-1 text-[11px] text-lime-300 hover:text-lime-200"
+                >
+                  {provider.id === 'ollama' ? 'Setup' : 'Details'}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

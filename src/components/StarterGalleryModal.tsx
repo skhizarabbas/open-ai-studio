@@ -89,7 +89,7 @@ export const StarterGalleryModal: React.FC<StarterGalleryModalProps> = ({
                   className="w-full py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-xs font-medium text-white flex items-center justify-center gap-1.5"
                 >
                   <Play className="w-3.5 h-3.5" />
-                  {isCurrent ? 'Reset & Reload Starter' : 'Load Starter into WebContainer'}
+                  {isCurrent ? 'Create Another Project' : 'Create Project'}
                 </button>
               </div>
             );
